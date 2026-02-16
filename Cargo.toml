@@ -1,6 +1,69 @@
-[package]
-name = "pulsos-cli"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "2"
+members = [
+    "crates/pulsos-core",
+    "crates/pulsos-cli",
+    "crates/pulsos-test",
+]
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/lambdahq/pulsos"
+
+[workspace.dependencies]
+# HTTP + async
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Cache
+sled = "0.34"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Auth
+keyring = "3"
+secrecy = { version = "0.8", features = ["serde"] }
+
+# Interactive
+dialoguer = "0.11"
+fuzzy-matcher = "0.3"
+
+# Table output
+tabled = "0.16"
+
+# TUI (Phase 6)
+ratatui = "0.29"
+crossterm = "0.28"
+
+# GraphQL
+graphql_client = "0.14"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Paths
+dirs = "5"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Testing
+wiremock = "0.6"
+
+# Internal crates
+pulsos-core = { path = "crates/pulsos-core" }
+pulsos-test = { path = "crates/pulsos-test" }

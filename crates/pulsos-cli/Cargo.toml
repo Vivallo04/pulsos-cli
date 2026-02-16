@@ -1,0 +1,19 @@
+[package]
+name = "pulsos-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pulsos"
+path = "src/main.rs"
+
+[dependencies]
+pulsos-core.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tabled.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
