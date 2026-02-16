@@ -24,7 +24,7 @@ Pulsos follows a set of core principles that guide every architectural and UX de
 
 Zero external dependencies: Pulsos is a single binary. No gh, railway, vercel, Node.js, or any other tool required. All data is fetched via direct API calls.
 
-Read-only by design: Pulsos never needs write access to any platform. All API tokens require only read scopes. This is a trust and security selling point for enterprise and open-source adoption. Pulsos cannot modify your repositories, trigger deployments, or change any configuration.
+Read-only by design: Pulsos never needs write access to any platform and only performs read operations. Some platforms (notably GitHub classic PATs for private Actions data) still require write-capable token scopes due to API design. Pulsos cannot modify your repositories, trigger deployments, or change any configuration.
 
 API-first, CLI-optional: All data fetching goes through platform APIs directly (api.github.com, backboard.railway.com/graphql/v2, api.vercel.com). If a user happens to have platform CLIs installed, Pulsos can detect and reuse their existing authentication tokens as a convenience — but never requires them.
 
@@ -356,7 +356,7 @@ Credential Manager (via wincred API)
 
 Encrypted file
 
-The encrypted file fallback uses AES-256-GCM with a key derived from a machine-specific identifier. It is not as secure as the OS keyring but covers headless servers and minimal Linux installations without a desktop environment.
+The encrypted file fallback uses AES-256-GCM with a key derived from the host identifier (Linux: `/etc/machine-id`, macOS: IOPlatformUUID, Windows: MachineGuid) plus a per-install random salt. This fallback protects against casual plaintext token disclosure but is weaker than OS keyrings because machine identifiers are not user secrets.
 
 Tokens in memory are wrapped in the secrecy crate's Secret<String> type, which zeroes memory on drop and prevents accidental logging.
 
@@ -636,11 +636,11 @@ Access Level
 
 GitHub
 
-repo (read), read:org
+repo, read:org
 
 Read workflow runs, list org repos
 
-Read-only
+Read API usage (token itself is write-capable)
 
 Railway
 
@@ -658,7 +658,7 @@ List teams, projects, deployments
 
 Read-only
 
-Pulsos never requests write, delete, or admin scopes. It cannot modify repositories, trigger deployments, or change configuration. This is enforced at token validation — if a token has unnecessary write scopes, Pulsos warns the user but still functions.
+Pulsos only performs read operations, but GitHub classic PATs require the write-capable `repo` scope to access private Actions data. Pulsos validates scopes and warns about over-privileged tokens (for example, `delete_repo`) while still functioning. This is a GitHub platform limitation; prefer fine-grained PATs with read-only repository permissions where possible.
 
 4.3 GitHub Authentication
 
@@ -668,7 +668,7 @@ $ pulsos auth github
 
   Create a GitHub Personal Access Token:
   1. Visit https://github.com/settings/tokens/new
-  2. Select scopes: repo (read), read:org
+  2. Select scopes: repo, read:org (classic PAT; note `repo` is write-capable)
   3. Generate and copy the token
 
   Paste your token: ghp_****************************
@@ -1284,9 +1284,9 @@ vercel_include_previews = true
 
 9.1 Security Guarantees
 
-Read-only access: Pulsos never requests or uses write, delete, or admin API scopes. It cannot modify repositories, trigger deployments, change configuration, or access secrets/environment variables.
+Read-only API behavior: Pulsos only performs read operations and never calls write/delete/admin endpoints. GitHub private-repo access currently requires the classic `repo` scope (write-capable token), so this is a platform limitation rather than a Pulsos behavior choice. Prefer GitHub fine-grained PATs with read-only permissions where feasible.
 
-Secure token storage: Tokens are stored in the OS-native keyring (Keychain, Secret Service, Credential Manager). They are never stored in plaintext config files. The fallback encrypted file uses AES-256-GCM.
+Secure token storage: Tokens are stored in the OS-native keyring (Keychain, Secret Service, Credential Manager). They are never stored in plaintext config files. The fallback encrypted file uses AES-256-GCM with a machine-identifier-derived key plus salt, which is convenience-grade and weaker than keyring-backed storage.
 
 Memory safety: Tokens in memory are wrapped in secrecy::Secret<String>, which zeroes memory on drop. This prevents tokens from appearing in core dumps or memory forensics.
 
@@ -1926,4 +1926,3 @@ show_sparklines = true
 [cache]
 directory = "~/.cache/pulsos/"
 max_size_mb = 100
-

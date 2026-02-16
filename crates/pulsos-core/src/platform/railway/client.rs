@@ -241,7 +241,8 @@ impl PlatformAdapter for RailwayClient {
                 .await
             {
                 Ok(data) => {
-                    let cache_key = crate::cache::keys::railway_deployments_key(project_id);
+                    let cache_key =
+                        crate::cache::keys::railway_deployments_key(project_id, service_id, env_id);
                     let deployments: Vec<RwDeployment> =
                         data.deployments.edges.into_iter().map(|e| e.node).collect();
                     let _ = self.cache.set(&cache_key, &deployments, 30, None);
@@ -260,7 +261,8 @@ impl PlatformAdapter for RailwayClient {
                         error = %e,
                         "Failed to fetch Railway deployments, trying cache"
                     );
-                    let cache_key = crate::cache::keys::railway_deployments_key(project_id);
+                    let cache_key =
+                        crate::cache::keys::railway_deployments_key(project_id, service_id, env_id);
                     if let Ok(Some(cached)) = self.cache.get::<Vec<RwDeployment>>(&cache_key) {
                         for d in &cached.data {
                             all_events.push(Self::deployment_to_event(
@@ -295,14 +297,34 @@ impl PlatformAdapter for RailwayClient {
 
             for proj_edge in &projects_data.projects.edges {
                 let proj = &proj_edge.node;
-                resources.push(DiscoveredResource {
-                    platform_id: proj.id.clone(),
-                    display_name: proj.name.clone(),
-                    group: team.name.clone(),
-                    group_type: "workspace".into(),
-                    archived: false,
-                    disabled: false,
-                });
+                let services: Vec<_> = proj.services.edges.iter().map(|s| &s.node).collect();
+                let environments: Vec<_> =
+                    proj.environments.edges.iter().map(|e| &e.node).collect();
+
+                if services.is_empty() || environments.is_empty() {
+                    tracing::debug!(
+                        project_id = %proj.id,
+                        project_name = %proj.name,
+                        "Skipping Railway project with missing services or environments"
+                    );
+                    continue;
+                }
+
+                for service in &services {
+                    for environment in &environments {
+                        resources.push(DiscoveredResource {
+                            platform_id: format!("{}:{}:{}", proj.id, service.id, environment.id),
+                            display_name: format!(
+                                "{} / {} / {}",
+                                proj.name, service.name, environment.name
+                            ),
+                            group: team.name.clone(),
+                            group_type: "workspace".into(),
+                            archived: false,
+                            disabled: false,
+                        });
+                    }
+                }
             }
         }
 

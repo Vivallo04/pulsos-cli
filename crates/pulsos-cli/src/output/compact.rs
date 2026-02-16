@@ -1,7 +1,7 @@
 use chrono::Utc;
 use pulsos_core::domain::deployment::{DeploymentEvent, DeploymentStatus};
 
-pub fn render(events: &[DeploymentEvent], _no_color: bool) {
+pub fn render(events: &[DeploymentEvent]) {
     if events.is_empty() {
         println!("No deployment events found.");
         return;
@@ -23,8 +23,8 @@ pub fn render(events: &[DeploymentEvent], _no_color: bool) {
         let age = format_age_compact(event.created_at);
         let title = event
             .title
-            .as_deref()
-            .unwrap_or(&event.id[..event.id.len().min(12)]);
+            .clone()
+            .unwrap_or_else(|| event.id.chars().take(12).collect::<String>());
         let platform = &event.platform;
         let branch = event.branch.as_deref().unwrap_or("-");
 

@@ -47,14 +47,10 @@ impl VercelClient {
     }
 
     async fn fetch_deployments(&self, project_id: &str) -> Result<Vec<VcDeployment>, PulsosError> {
-        let url = format!(
-            "{}/v6/deployments?projectId={}&limit=5",
-            self.base_url, project_id
-        );
-
         let resp = self
             .client
-            .get(&url)
+            .get(format!("{}/v6/deployments", self.base_url))
+            .query(&[("projectId", project_id), ("limit", "5")])
             .headers(self.auth_headers())
             .send()
             .await
@@ -204,11 +200,12 @@ impl PlatformAdapter for VercelClient {
                 source: Some(e),
             })?;
 
-        if !resp.status().is_success() {
+        let status = resp.status();
+        if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(PulsosError::ApiError {
                 platform: "Vercel".into(),
-                status: 0,
+                status: status.as_u16(),
                 body,
             });
         }

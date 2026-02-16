@@ -21,7 +21,7 @@ struct EventRow {
     duration: String,
 }
 
-pub fn render(events: &[DeploymentEvent], _no_color: bool) {
+pub fn render(events: &[DeploymentEvent]) {
     if events.is_empty() {
         println!("No deployment events found.");
         return;

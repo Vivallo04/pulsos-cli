@@ -5,6 +5,7 @@ use crate::platform::{
     AuthStatus, DiscoveredResource, PlatformAdapter, RateLimitInfo, TrackedResource,
 };
 use chrono::{DateTime, Utc};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -38,15 +39,24 @@ impl GitHubClient {
         }
     }
 
-    fn auth_headers(&self) -> reqwest::header::HeaderMap {
-        let mut headers = reqwest::header::HeaderMap::new();
+    fn auth_headers(&self) -> Result<HeaderMap, PulsosError> {
+        let mut headers = HeaderMap::new();
+        let auth = HeaderValue::from_str(&format!("Bearer {}", self.token)).map_err(|e| {
+            PulsosError::AuthFailed {
+                platform: "GitHub".into(),
+                reason: format!("Invalid token format for Authorization header: {e}"),
+            }
+        })?;
+        headers.insert(AUTHORIZATION, auth);
         headers.insert(
-            "Authorization",
-            format!("Bearer {}", self.token).parse().unwrap(),
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.github+json"),
         );
-        headers.insert("Accept", "application/vnd.github+json".parse().unwrap());
-        headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
-        headers
+        headers.insert(
+            "X-GitHub-Api-Version",
+            HeaderValue::from_static("2022-11-28"),
+        );
+        Ok(headers)
     }
 
     async fn update_rate_limit(&self, resp: &reqwest::Response) {
@@ -84,7 +94,7 @@ impl GitHubClient {
         let resp = self
             .client
             .get(&url)
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .send()
             .await
             .map_err(|e| PulsosError::Network {
@@ -106,7 +116,7 @@ impl GitHubClient {
             let rl = self.rate_limit.read().await;
             let reset_at = rl
                 .as_ref()
-                .map(|r| r.reset.format("%H:%M").to_string())
+                .map(|r| r.reset.to_rfc3339())
                 .unwrap_or_else(|| "unknown".into());
             return Err(PulsosError::RateLimited {
                 platform: "GitHub".into(),
@@ -210,7 +220,7 @@ impl PlatformAdapter for GitHubClient {
         let resp = self
             .client
             .get(&url)
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .send()
             .await
             .map_err(|e| PulsosError::Network {
@@ -221,22 +231,36 @@ impl PlatformAdapter for GitHubClient {
 
         self.update_rate_limit(&resp).await;
 
-        if resp.status().is_success() {
-            let repos: Vec<GhRepo> = resp.json().await.map_err(|e| PulsosError::ParseError {
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(PulsosError::ApiError {
                 platform: "GitHub".into(),
-                message: e.to_string(),
-            })?;
+                status: status.as_u16(),
+                body,
+            });
+        }
 
-            for repo in repos {
-                resources.push(DiscoveredResource {
-                    platform_id: repo.full_name.clone(),
-                    display_name: repo.name,
-                    group: repo.owner.login,
-                    group_type: "organization".into(),
-                    archived: repo.archived,
-                    disabled: repo.disabled,
-                });
-            }
+        let repos: Vec<GhRepo> = resp.json().await.map_err(|e| PulsosError::ParseError {
+            platform: "GitHub".into(),
+            message: e.to_string(),
+        })?;
+
+        for repo in repos {
+            let group_type = if repo.owner.owner_type.eq_ignore_ascii_case("organization") {
+                "organization"
+            } else {
+                "user"
+            };
+
+            resources.push(DiscoveredResource {
+                platform_id: repo.full_name.clone(),
+                display_name: repo.name,
+                group: repo.owner.login,
+                group_type: group_type.into(),
+                archived: repo.archived,
+                disabled: repo.disabled,
+            });
         }
 
         Ok(resources)
@@ -247,7 +271,7 @@ impl PlatformAdapter for GitHubClient {
         let resp = self
             .client
             .get(&url)
-            .headers(self.auth_headers())
+            .headers(self.auth_headers()?)
             .send()
             .await
             .map_err(|e| PulsosError::Network {

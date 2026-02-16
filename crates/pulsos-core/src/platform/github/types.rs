@@ -48,8 +48,12 @@ impl WorkflowRun {
                 Some(GhConclusion::Cancelled) => DeploymentStatus::Cancelled,
                 Some(GhConclusion::Skipped) => DeploymentStatus::Skipped,
                 Some(GhConclusion::ActionRequired) => DeploymentStatus::ActionRequired,
+                Some(GhConclusion::Unknown) => {
+                    DeploymentStatus::Unknown("unknown_conclusion".into())
+                }
                 None => DeploymentStatus::Unknown("completed_no_conclusion".to_string()),
             },
+            GhRunStatus::Unknown => DeploymentStatus::Unknown("unknown_status".into()),
         }
     }
 }
@@ -64,6 +68,8 @@ pub enum GhRunStatus {
     Waiting,
     Requested,
     Pending,
+    #[serde(other)]
+    Unknown,
 }
 
 /// GitHub workflow run conclusion values.
@@ -79,6 +85,8 @@ pub enum GhConclusion {
     Neutral,
     Stale,
     StartupFailure,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

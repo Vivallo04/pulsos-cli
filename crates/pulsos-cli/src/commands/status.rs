@@ -42,7 +42,7 @@ fn env_token(name: &str) -> Option<String> {
 pub async fn execute(
     args: StatusArgs,
     format: OutputFormat,
-    no_color: bool,
+    _no_color: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
     let config = load_config(config_path).map_err(|e| match e {
@@ -57,11 +57,56 @@ pub async fn execute(
     let cache = Arc::new(CacheStore::open_default()?);
     let mut all_events: Vec<DeploymentEvent> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+    let selected_view = if let Some(view_name) = args.view.as_ref() {
+        Some(
+            config
+                .views
+                .iter()
+                .find(|v| v.name.eq_ignore_ascii_case(view_name))
+                .ok_or_else(|| anyhow::anyhow!("Saved view not found: {view_name}"))?,
+        )
+    } else {
+        None
+    };
+
+    let branch_filter = if args.branch.is_some() {
+        args.branch.clone()
+    } else if let Some(view) = selected_view {
+        view.branch_filter.clone()
+    } else {
+        None
+    };
 
     let should_fetch = |platform: &str| -> bool {
-        args.platform
-            .as_ref()
-            .is_none_or(|p| p.eq_ignore_ascii_case(platform))
+        if let Some(p) = args.platform.as_ref() {
+            return p.eq_ignore_ascii_case(platform);
+        }
+        if let Some(view) = selected_view {
+            if !view.platforms.is_empty() {
+                return view
+                    .platforms
+                    .iter()
+                    .any(|p| p.eq_ignore_ascii_case(platform));
+            }
+        }
+        true
+    };
+
+    let correlation_in_scope = |name: &str| -> bool {
+        if let Some(project_filter) = args.project.as_ref() {
+            let needle = project_filter.to_ascii_lowercase();
+            if !name.to_ascii_lowercase().contains(&needle) {
+                return false;
+            }
+        }
+
+        if let Some(view) = selected_view {
+            if !view.projects.is_empty() {
+                return view.projects.iter().any(|p| p.eq_ignore_ascii_case(name));
+            }
+        }
+
+        true
     };
 
     // Build tracked resources from correlations config.
@@ -71,6 +116,10 @@ pub async fn execute(
     let mut vercel_tracked: Vec<TrackedResource> = Vec::new();
 
     for corr in &config.correlations {
+        if !correlation_in_scope(&corr.name) {
+            continue;
+        }
+
         if let Some(ref repo) = corr.github_repo {
             github_tracked.push(TrackedResource {
                 platform_id: repo.clone(),
@@ -137,7 +186,7 @@ pub async fn execute(
     }
 
     // Apply branch filter
-    if let Some(ref branch) = args.branch {
+    if let Some(ref branch) = branch_filter {
         all_events.retain(|e| {
             e.branch
                 .as_ref()
@@ -148,11 +197,16 @@ pub async fn execute(
     // Sort by created_at descending
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
+    if args.watch {
+        warnings
+            .push("--watch mode is not implemented yet; showing a single snapshot instead.".into());
+    }
+
     // Output
     match format {
-        OutputFormat::Table => output::table::render(&all_events, no_color),
+        OutputFormat::Table => output::table::render(&all_events),
         OutputFormat::Json => output::json::render(&all_events)?,
-        OutputFormat::Compact => output::compact::render(&all_events, no_color),
+        OutputFormat::Compact => output::compact::render(&all_events),
     }
 
     // Show warnings

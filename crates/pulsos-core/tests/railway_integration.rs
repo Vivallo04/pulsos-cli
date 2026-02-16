@@ -10,7 +10,11 @@ async fn fetch_events_returns_deployments() {
     let mock = MockRailway::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = RailwayClient::new_with_base_url("test-railway-token".into(), mock.url(), cache);
+    let client = RailwayClient::new_with_base_url(
+        "test-railway-token".into(),
+        format!("{}/graphql/v2", mock.url()),
+        cache,
+    );
 
     let tracked = vec![TrackedResource {
         platform_id: "proj-001:svc-001:env-001".into(),
@@ -37,7 +41,11 @@ async fn validate_auth_succeeds() {
     let mock = MockRailway::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = RailwayClient::new_with_base_url("test-railway-token".into(), mock.url(), cache);
+    let client = RailwayClient::new_with_base_url(
+        "test-railway-token".into(),
+        format!("{}/graphql/v2", mock.url()),
+        cache,
+    );
 
     let status = client.validate_auth().await.unwrap();
     assert!(status.valid);

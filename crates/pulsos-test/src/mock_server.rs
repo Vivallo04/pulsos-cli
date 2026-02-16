@@ -72,6 +72,7 @@ impl MockRailway {
 
         // POST /graphql/v2 — deployments query
         Mock::given(method("POST"))
+            .and(path("/graphql/v2"))
             .and(wiremock::matchers::body_string_contains("deployments"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(fixtures::railway::deployments_response()),
@@ -82,6 +83,7 @@ impl MockRailway {
 
         // POST /graphql/v2 — me query
         Mock::given(method("POST"))
+            .and(path("/graphql/v2"))
             .and(wiremock::matchers::body_string_contains("me"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(fixtures::railway::me_response()),

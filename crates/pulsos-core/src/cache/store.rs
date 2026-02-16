@@ -4,6 +4,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 
+const STALENESS_MULTIPLIER: u64 = 120;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CacheEntry<T> {
     pub data: T,
@@ -31,9 +33,9 @@ impl<T> CacheEntry<T> {
         !self.is_fresh() && !self.is_expired()
     }
 
-    /// Expired = older than max staleness (TTL * 120 = 2 hours for 30s TTL).
+    /// Expired = older than max staleness (TTL * STALENESS_MULTIPLIER).
     pub fn is_expired(&self) -> bool {
-        let max_staleness = self.ttl_secs * 120;
+        let max_staleness = self.ttl_secs.saturating_mul(STALENESS_MULTIPLIER);
         let age = Utc::now() - self.fetched_at;
         age.num_seconds() > max_staleness as i64
     }
@@ -141,14 +143,15 @@ impl CacheStore {
 mod tests {
     use super::*;
 
-    fn temp_cache() -> CacheStore {
+    fn temp_cache() -> (CacheStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        CacheStore::open(dir.path()).unwrap()
+        let cache = CacheStore::open(dir.path()).unwrap();
+        (cache, dir)
     }
 
     #[test]
     fn set_and_get() {
-        let cache = temp_cache();
+        let (cache, _dir) = temp_cache();
         cache.set("test:key", vec![1, 2, 3], 30, None).unwrap();
         let entry: CacheEntry<Vec<i32>> = cache.get("test:key").unwrap().unwrap();
         assert_eq!(entry.data, vec![1, 2, 3]);
@@ -158,14 +161,14 @@ mod tests {
 
     #[test]
     fn get_missing_key() {
-        let cache = temp_cache();
+        let (cache, _dir) = temp_cache();
         let entry: Option<CacheEntry<String>> = cache.get("nonexistent").unwrap();
         assert!(entry.is_none());
     }
 
     #[test]
     fn delete_key() {
-        let cache = temp_cache();
+        let (cache, _dir) = temp_cache();
         cache.set("to_delete", "value", 30, None).unwrap();
         assert!(cache.get::<String>("to_delete").unwrap().is_some());
         cache.delete("to_delete").unwrap();
@@ -174,7 +177,7 @@ mod tests {
 
     #[test]
     fn clear_all() {
-        let cache = temp_cache();
+        let (cache, _dir) = temp_cache();
         cache.set("key1", "a", 30, None).unwrap();
         cache.set("key2", "b", 30, None).unwrap();
         assert_eq!(cache.len(), 2);
@@ -184,7 +187,7 @@ mod tests {
 
     #[test]
     fn cache_entry_with_etag() {
-        let cache = temp_cache();
+        let (cache, _dir) = temp_cache();
         cache
             .set("etag_test", "data", 30, Some("\"abc123\"".into()))
             .unwrap();

@@ -28,8 +28,8 @@ pub fn github_rate_limit_key() -> String {
     "meta:github:rate_limit".to_string()
 }
 
-pub fn railway_deployments_key(project_id: &str) -> String {
-    format!("railway:deployments:{project_id}")
+pub fn railway_deployments_key(project_id: &str, service_id: &str, env_id: &str) -> String {
+    format!("railway:deployments:{project_id}:{service_id}:{env_id}")
 }
 
 pub fn railway_instance_key(service_id: &str, env_id: &str) -> String {
@@ -59,8 +59,8 @@ mod tests {
             "meta:github:etag:myorg/my-saas"
         );
         assert_eq!(
-            railway_deployments_key("proj-123"),
-            "railway:deployments:proj-123"
+            railway_deployments_key("proj-123", "svc-1", "env-2"),
+            "railway:deployments:proj-123:svc-1:env-2"
         );
         assert_eq!(
             railway_instance_key("svc-1", "env-2"),

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// A unified project — the core abstraction that maps across platforms.
 /// Created during first-run wizard and stored in config.toml.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedProject {
     /// User-facing name (e.g., "my-saas")
     pub name: String,
@@ -20,7 +20,7 @@ pub struct UnifiedProject {
     pub health_score: Option<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubBinding {
     /// "myorg/my-saas"
     pub repo_full_name: String,
@@ -29,7 +29,7 @@ pub struct GitHubBinding {
     pub default_branch: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RailwayBinding {
     pub project_id: String,
     pub project_name: String,
@@ -41,13 +41,13 @@ pub struct RailwayBinding {
     pub environment_name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RailwayServiceRef {
     pub service_id: String,
     pub service_name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VercelBinding {
     pub project_id: String,
     pub project_name: String,
