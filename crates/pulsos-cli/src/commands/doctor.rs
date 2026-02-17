@@ -1,21 +1,16 @@
 use anyhow::Result;
 use clap::Args;
+use pulsos_core::auth::credential_store::KeyringStore;
+use pulsos_core::auth::resolve::TokenResolver;
+use pulsos_core::auth::validate::validate_token;
+use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::load_config;
-use pulsos_core::platform::github::client::GitHubClient;
-use pulsos_core::platform::railway::client::RailwayClient;
-use pulsos_core::platform::vercel::client::VercelClient;
-use pulsos_core::platform::PlatformAdapter;
 use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Args)]
 pub struct DoctorArgs {}
-
-/// Resolve a token from environment variable.
-fn env_token(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|t| !t.is_empty())
-}
 
 pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()> {
     println!("Pulsos Doctor v{}", env!("CARGO_PKG_VERSION"));
@@ -23,15 +18,21 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
     println!();
 
     // Config check
-    print!("  Config file:  ");
-    match load_config(config_path) {
-        Ok(_) => println!("found"),
-        Err(e) => {
-            println!("MISSING - {e}");
-            println!();
-            println!("  Run `pulsos repos sync` to create a configuration.");
+    let config = {
+        print!("  Config file:  ");
+        match load_config(config_path) {
+            Ok(c) => {
+                println!("found");
+                Some(c)
+            }
+            Err(e) => {
+                println!("MISSING - {e}");
+                println!();
+                println!("  Run `pulsos repos sync` to create a configuration.");
+                None
+            }
         }
-    }
+    };
 
     let cache = Arc::new(CacheStore::open_default()?);
 
@@ -40,43 +41,36 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
     println!("{} entries", cache.len());
     println!();
 
-    // Platform auth checks via env tokens
+    // Build token resolver
+    let store = Arc::new(KeyringStore::new());
+    let detection_config = config
+        .as_ref()
+        .map(|c| c.auth.token_detection.clone())
+        .unwrap_or_default();
+    let resolver = TokenResolver::new(store, detection_config);
+
+    // Platform auth checks via TokenResolver
     println!("  Platforms");
 
-    // GitHub
-    print!("    GitHub:     ");
-    if let Some(token) = env_token("GITHUB_TOKEN") {
-        let client = GitHubClient::new(token, cache.clone());
-        match client.validate_auth().await {
-            Ok(status) => println!("OK ({})", status.identity),
-            Err(e) => println!("FAIL - {e}"),
-        }
-    } else {
-        println!("no GITHUB_TOKEN set");
-    }
+    for platform in &PlatformKind::ALL {
+        print!("    {:<12}", format!("{}:", platform.display_name()));
 
-    // Railway
-    print!("    Railway:    ");
-    if let Some(token) = env_token("RAILWAY_TOKEN") {
-        let client = RailwayClient::new(token, cache.clone());
-        match client.validate_auth().await {
-            Ok(status) => println!("OK ({})", status.identity),
-            Err(e) => println!("FAIL - {e}"),
+        match resolver.resolve_with_source(platform) {
+            Some((token, source)) => match validate_token(platform, &token, &cache).await {
+                Ok(status) => {
+                    println!("OK via {} ({})", source, status.identity);
+                    for warning in &status.warnings {
+                        println!("    {:<12}  warning: {}", "", warning);
+                    }
+                }
+                Err(e) => {
+                    println!("FAIL via {} - {}", source, e);
+                }
+            },
+            None => {
+                println!("no token found");
+            }
         }
-    } else {
-        println!("no RAILWAY_TOKEN set");
-    }
-
-    // Vercel
-    print!("    Vercel:     ");
-    if let Some(token) = env_token("VERCEL_TOKEN") {
-        let client = VercelClient::new(token, cache.clone());
-        match client.validate_auth().await {
-            Ok(status) => println!("OK ({})", status.identity),
-            Err(e) => println!("FAIL - {e}"),
-        }
-    } else {
-        println!("no VERCEL_TOKEN set");
     }
 
     println!();

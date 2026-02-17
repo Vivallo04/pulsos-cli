@@ -1,6 +1,9 @@
 use crate::output::{self, OutputFormat};
 use anyhow::Result;
 use clap::Args;
+use pulsos_core::auth::credential_store::KeyringStore;
+use pulsos_core::auth::resolve::TokenResolver;
+use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::load_config;
 use pulsos_core::domain::deployment::DeploymentEvent;
@@ -34,11 +37,6 @@ pub struct StatusArgs {
     pub watch: bool,
 }
 
-/// Resolve a token from environment variable.
-fn env_token(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|t| !t.is_empty())
-}
-
 pub async fn execute(
     args: StatusArgs,
     format: OutputFormat,
@@ -55,6 +53,9 @@ pub async fn execute(
     })?;
 
     let cache = Arc::new(CacheStore::open_default()?);
+    let store = Arc::new(KeyringStore::new());
+    let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
+
     let mut all_events: Vec<DeploymentEvent> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let selected_view = if let Some(view_name) = args.view.as_ref() {
@@ -147,20 +148,21 @@ pub async fn execute(
 
     // GitHub
     if should_fetch("github") && !github_tracked.is_empty() {
-        if let Some(token) = env_token("GITHUB_TOKEN") {
+        if let Some(token) = resolver.resolve(&PlatformKind::GitHub) {
             let client = GitHubClient::new(token, cache.clone());
             match client.fetch_events(&github_tracked).await {
                 Ok(events) => all_events.extend(events),
                 Err(e) => warnings.push(format!("GitHub: {}", e.user_message())),
             }
         } else {
-            warnings.push("GitHub: no token found. Set GITHUB_TOKEN environment variable.".into());
+            warnings
+                .push("GitHub: no token found. Run `pulsos auth github` to authenticate.".into());
         }
     }
 
     // Railway
     if should_fetch("railway") && !railway_tracked.is_empty() {
-        if let Some(token) = env_token("RAILWAY_TOKEN") {
+        if let Some(token) = resolver.resolve(&PlatformKind::Railway) {
             let client = RailwayClient::new(token, cache.clone());
             match client.fetch_events(&railway_tracked).await {
                 Ok(events) => all_events.extend(events),
@@ -168,20 +170,21 @@ pub async fn execute(
             }
         } else {
             warnings
-                .push("Railway: no token found. Set RAILWAY_TOKEN environment variable.".into());
+                .push("Railway: no token found. Run `pulsos auth railway` to authenticate.".into());
         }
     }
 
     // Vercel
     if should_fetch("vercel") && !vercel_tracked.is_empty() {
-        if let Some(token) = env_token("VERCEL_TOKEN") {
+        if let Some(token) = resolver.resolve(&PlatformKind::Vercel) {
             let client = VercelClient::new(token, cache.clone());
             match client.fetch_events(&vercel_tracked).await {
                 Ok(events) => all_events.extend(events),
                 Err(e) => warnings.push(format!("Vercel: {}", e.user_message())),
             }
         } else {
-            warnings.push("Vercel: no token found. Set VERCEL_TOKEN environment variable.".into());
+            warnings
+                .push("Vercel: no token found. Run `pulsos auth vercel` to authenticate.".into());
         }
     }
 

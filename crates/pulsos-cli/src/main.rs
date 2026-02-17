@@ -68,7 +68,7 @@ async fn main() {
         Some(Commands::Status(args)) => {
             commands::status::execute(args, cli.format, cli.no_color, config_path).await
         }
-        Some(Commands::Auth(args)) => commands::auth::execute(args).await,
+        Some(Commands::Auth(args)) => commands::auth::execute(args, config_path).await,
         Some(Commands::Repos(args)) => commands::repos::execute(args).await,
         Some(Commands::Views(args)) => commands::views::execute(args).await,
         Some(Commands::Doctor(args)) => commands::doctor::execute(args, config_path).await,

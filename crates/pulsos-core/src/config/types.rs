@@ -44,7 +44,7 @@ fn default_github_host() -> String {
     "github.com".to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenDetectionConfig {
     #[serde(default = "default_true")]
     pub detect_gh_cli: bool,
