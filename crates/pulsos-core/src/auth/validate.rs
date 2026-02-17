@@ -10,6 +10,7 @@ use crate::platform::github::client::GitHubClient;
 use crate::platform::railway::client::RailwayClient;
 use crate::platform::vercel::client::VercelClient;
 use crate::platform::{AuthStatus, PlatformAdapter};
+use secrecy::SecretString;
 use std::sync::Arc;
 
 /// Validate a token against the platform API and check scopes.
@@ -18,20 +19,20 @@ use std::sync::Arc;
 /// required scopes, dangerous scopes present).
 pub async fn validate_token(
     platform: &PlatformKind,
-    token: &str,
+    token: SecretString,
     cache: &Arc<CacheStore>,
 ) -> Result<AuthStatus, PulsosError> {
     let mut status = match platform {
         PlatformKind::GitHub => {
-            let client = GitHubClient::new(token.to_string(), cache.clone());
+            let client = GitHubClient::new(token, cache.clone());
             client.validate_auth().await?
         }
         PlatformKind::Railway => {
-            let client = RailwayClient::new(token.to_string(), cache.clone());
+            let client = RailwayClient::new(token, cache.clone());
             client.validate_auth().await?
         }
         PlatformKind::Vercel => {
-            let client = VercelClient::new(token.to_string(), cache.clone());
+            let client = VercelClient::new(token, cache.clone());
             client.validate_auth().await?
         }
     };

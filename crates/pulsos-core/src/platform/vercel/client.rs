@@ -5,6 +5,7 @@ use crate::platform::{
     AuthStatus, DiscoveredResource, PlatformAdapter, RateLimitInfo, TrackedResource,
 };
 use chrono::{DateTime, Utc};
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 
 use super::types::{
@@ -14,16 +15,20 @@ use super::types::{
 pub struct VercelClient {
     client: reqwest::Client,
     base_url: String,
-    token: String,
+    token: SecretString,
     cache: Arc<CacheStore>,
 }
 
 impl VercelClient {
-    pub fn new(token: String, cache: Arc<CacheStore>) -> Self {
+    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Self {
         Self::new_with_base_url(token, "https://api.vercel.com".into(), cache)
     }
 
-    pub fn new_with_base_url(token: String, base_url: String, cache: Arc<CacheStore>) -> Self {
+    pub fn new_with_base_url(
+        token: SecretString,
+        base_url: String,
+        cache: Arc<CacheStore>,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
             .build()
@@ -41,7 +46,9 @@ impl VercelClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "Authorization",
-            format!("Bearer {}", self.token).parse().unwrap(),
+            format!("Bearer {}", self.token.expose_secret())
+                .parse()
+                .unwrap(),
         );
         headers
     }

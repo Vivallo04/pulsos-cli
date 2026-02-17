@@ -18,3 +18,4 @@ tabled.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 dialoguer.workspace = true
+secrecy.workspace = true

@@ -1,5 +1,6 @@
 use crate::auth::PlatformKind;
 use crate::error::PulsosError;
+use secrecy::SecretString;
 
 /// Abstraction over credential storage backends.
 ///
@@ -7,7 +8,7 @@ use crate::error::PulsosError;
 /// replace the OS keyring in tests.
 pub trait CredentialStore: Send + Sync {
     /// Retrieve the stored token for a platform. Returns `None` if no token is stored.
-    fn get(&self, platform: &PlatformKind) -> Result<Option<String>, PulsosError>;
+    fn get(&self, platform: &PlatformKind) -> Result<Option<SecretString>, PulsosError>;
 
     /// Store a token for a platform, overwriting any existing value.
     fn set(&self, platform: &PlatformKind, token: &str) -> Result<(), PulsosError>;
@@ -47,10 +48,10 @@ impl Default for KeyringStore {
 }
 
 impl CredentialStore for KeyringStore {
-    fn get(&self, platform: &PlatformKind) -> Result<Option<String>, PulsosError> {
+    fn get(&self, platform: &PlatformKind) -> Result<Option<SecretString>, PulsosError> {
         let entry = self.entry(platform)?;
         match entry.get_password() {
-            Ok(password) => Ok(Some(password)),
+            Ok(password) => Ok(Some(SecretString::new(password))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(PulsosError::Keyring(format!(
                 "Failed to read {} token from keyring: {}",
@@ -110,12 +111,14 @@ impl Default for InMemoryStore {
 }
 
 impl CredentialStore for InMemoryStore {
-    fn get(&self, platform: &PlatformKind) -> Result<Option<String>, PulsosError> {
+    fn get(&self, platform: &PlatformKind) -> Result<Option<SecretString>, PulsosError> {
         let tokens = self
             .tokens
             .lock()
             .map_err(|e| PulsosError::Keyring(format!("InMemoryStore lock poisoned: {}", e)))?;
-        Ok(tokens.get(platform.keyring_username()).cloned())
+        Ok(tokens
+            .get(platform.keyring_username())
+            .map(|t| SecretString::new(t.clone())))
     }
 
     fn set(&self, platform: &PlatformKind, token: &str) -> Result<(), PulsosError> {
@@ -140,19 +143,25 @@ impl CredentialStore for InMemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
+
+    /// Helper to extract the exposed secret for test assertions.
+    fn exposed(secret: Option<SecretString>) -> Option<String> {
+        secret.map(|s| s.expose_secret().to_string())
+    }
 
     #[test]
     fn in_memory_store_get_missing_returns_none() {
         let store = InMemoryStore::new();
         let result = store.get(&PlatformKind::GitHub).unwrap();
-        assert_eq!(result, None);
+        assert!(result.is_none());
     }
 
     #[test]
     fn in_memory_store_set_and_get() {
         let store = InMemoryStore::new();
         store.set(&PlatformKind::GitHub, "ghp_test123").unwrap();
-        let result = store.get(&PlatformKind::GitHub).unwrap();
+        let result = exposed(store.get(&PlatformKind::GitHub).unwrap());
         assert_eq!(result, Some("ghp_test123".to_string()));
     }
 
@@ -161,7 +170,7 @@ mod tests {
         let store = InMemoryStore::new();
         store.set(&PlatformKind::Railway, "token1").unwrap();
         store.set(&PlatformKind::Railway, "token2").unwrap();
-        let result = store.get(&PlatformKind::Railway).unwrap();
+        let result = exposed(store.get(&PlatformKind::Railway).unwrap());
         assert_eq!(result, Some("token2".to_string()));
     }
 
@@ -171,7 +180,7 @@ mod tests {
         store.set(&PlatformKind::Vercel, "vc_token").unwrap();
         store.delete(&PlatformKind::Vercel).unwrap();
         let result = store.get(&PlatformKind::Vercel).unwrap();
-        assert_eq!(result, None);
+        assert!(result.is_none());
     }
 
     #[test]
@@ -188,13 +197,13 @@ mod tests {
         store.set(&PlatformKind::Railway, "rw_token").unwrap();
 
         assert_eq!(
-            store.get(&PlatformKind::GitHub).unwrap(),
+            exposed(store.get(&PlatformKind::GitHub).unwrap()),
             Some("gh_token".to_string())
         );
         assert_eq!(
-            store.get(&PlatformKind::Railway).unwrap(),
+            exposed(store.get(&PlatformKind::Railway).unwrap()),
             Some("rw_token".to_string())
         );
-        assert_eq!(store.get(&PlatformKind::Vercel).unwrap(), None);
+        assert!(store.get(&PlatformKind::Vercel).unwrap().is_none());
     }
 }

@@ -1,11 +1,13 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use pulsos_core::auth::credential_store::{CredentialStore, KeyringStore};
+use pulsos_core::auth::detect;
 use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::validate::validate_token;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::load_config;
+use secrecy::SecretString;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -75,7 +77,7 @@ async fn auth_status(resolver: &TokenResolver, cache: &Arc<CacheStore>) -> Resul
         print!("  {:<12}", format!("{}:", platform.display_name()));
 
         match resolver.resolve_with_source(platform) {
-            Some((token, source)) => match validate_token(platform, &token, cache).await {
+            Some((token, source)) => match validate_token(platform, token, cache).await {
                 Ok(status) => {
                     println!("OK via {} ({})", source, status.identity);
                     for warning in &status.warnings {
@@ -106,7 +108,7 @@ async fn auth_platform(
     println!("Authenticating with {}", platform.display_name());
     println!();
 
-    // Check if a token already exists
+    // Check if a token already exists in the keyring
     if let Ok(Some(_)) = store.get(&platform) {
         println!(
             "  A token is already stored in the keyring for {}.",
@@ -119,6 +121,56 @@ async fn auth_platform(
     // In --from-env mode, just check env vars
     if from_env {
         return auth_from_env(&platform, cache).await;
+    }
+
+    // Try to detect an existing token from CLI tools before prompting for manual input
+    if let Some((detected_token, source_name)) = detect_existing_cli_token(&platform) {
+        println!("  Found existing token from {} CLI.", source_name);
+
+        let reuse = dialoguer::Confirm::new()
+            .with_prompt("  Use this token?")
+            .default(true)
+            .interact()?;
+
+        if reuse {
+            // Store the plain text for keyring before wrapping in SecretString
+            let token_plain = detected_token.clone();
+            let token_secret = SecretString::new(detected_token);
+
+            // Validate the detected token
+            print!("  Validating... ");
+            match validate_token(&platform, token_secret, cache).await {
+                Ok(status) => {
+                    println!("OK ({})", status.identity);
+
+                    // Store in keyring
+                    store.set(&platform, &token_plain).map_err(|e| {
+                        anyhow::anyhow!("Token is valid but failed to store in keyring: {e}")
+                    })?;
+
+                    println!(
+                        "  Token stored securely in your OS keyring for {}.",
+                        platform.display_name()
+                    );
+
+                    for warning in &status.warnings {
+                        println!("  warning: {warning}");
+                    }
+
+                    println!();
+                    return Ok(());
+                }
+                Err(e) => {
+                    println!("FAILED");
+                    println!("  {e}");
+                    println!();
+                    println!("  Falling back to manual token entry.");
+                    println!();
+                }
+            }
+        } else {
+            println!();
+        }
     }
 
     // Show help text for getting a token
@@ -135,11 +187,12 @@ async fn auth_platform(
 
     // Validate the token
     print!("  Validating... ");
-    match validate_token(&platform, &token, cache).await {
+    let token_secret = SecretString::new(token.clone());
+    match validate_token(&platform, token_secret, cache).await {
         Ok(status) => {
             println!("OK ({})", status.identity);
 
-            // Store in keyring
+            // Store in keyring (using the plain text)
             store.set(&platform, &token).map_err(|e| {
                 anyhow::anyhow!("Token is valid but failed to store in keyring: {e}")
             })?;
@@ -168,13 +221,24 @@ async fn auth_platform(
     Ok(())
 }
 
+/// Try to detect an existing token from a CLI tool's config file.
+/// Returns `(token, tool_name)` if found.
+fn detect_existing_cli_token(platform: &PlatformKind) -> Option<(String, &'static str)> {
+    match platform {
+        PlatformKind::GitHub => detect::detect_gh_token().map(|t| (t, "gh")),
+        PlatformKind::Railway => detect::detect_railway_token().map(|t| (t, "Railway")),
+        PlatformKind::Vercel => detect::detect_vercel_token().map(|t| (t, "Vercel")),
+    }
+}
+
 /// Validate token from environment variable only.
 async fn auth_from_env(platform: &PlatformKind, cache: &Arc<CacheStore>) -> Result<()> {
     for var_name in platform.env_var_names() {
         if let Ok(token) = std::env::var(var_name) {
             if !token.is_empty() {
                 print!("  Found {var_name}. Validating... ");
-                match validate_token(platform, &token, cache).await {
+                let token_secret = SecretString::new(token);
+                match validate_token(platform, token_secret, cache).await {
                     Ok(status) => {
                         println!("OK ({})", status.identity);
                         for warning in &status.warnings {

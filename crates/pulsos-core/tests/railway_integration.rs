@@ -3,6 +3,7 @@ use pulsos_core::domain::deployment::{DeploymentStatus, Platform};
 use pulsos_core::platform::railway::client::RailwayClient;
 use pulsos_core::platform::{PlatformAdapter, TrackedResource};
 use pulsos_test::mock_server::MockRailway;
+use secrecy::SecretString;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -11,7 +12,7 @@ async fn fetch_events_returns_deployments() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
     let client = RailwayClient::new_with_base_url(
-        "test-railway-token".into(),
+        SecretString::new("test-railway-token".into()),
         format!("{}/graphql/v2", mock.url()),
         cache,
     );
@@ -42,7 +43,7 @@ async fn validate_auth_succeeds() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
     let client = RailwayClient::new_with_base_url(
-        "test-railway-token".into(),
+        SecretString::new("test-railway-token".into()),
         format!("{}/graphql/v2", mock.url()),
         cache,
     );

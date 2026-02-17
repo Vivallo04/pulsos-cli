@@ -1239,6 +1239,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "pulsos-core",
+ "secrecy",
  "serde_json",
  "tabled",
  "tokio",

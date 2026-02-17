@@ -8,6 +8,7 @@ use crate::auth::credential_store::CredentialStore;
 use crate::auth::detect;
 use crate::auth::PlatformKind;
 use crate::config::types::TokenDetectionConfig;
+use secrecy::SecretString;
 use std::fmt;
 use std::sync::Arc;
 
@@ -47,12 +48,15 @@ impl TokenResolver {
     }
 
     /// Resolve a token using the priority chain. Returns the first found token.
-    pub fn resolve(&self, platform: &PlatformKind) -> Option<String> {
+    pub fn resolve(&self, platform: &PlatformKind) -> Option<SecretString> {
         self.resolve_with_source(platform).map(|(token, _)| token)
     }
 
     /// Resolve a token and report where it came from.
-    pub fn resolve_with_source(&self, platform: &PlatformKind) -> Option<(String, TokenSource)> {
+    pub fn resolve_with_source(
+        &self,
+        platform: &PlatformKind,
+    ) -> Option<(SecretString, TokenSource)> {
         // 1. Environment variables
         if self.detection_config.detect_env_vars {
             if let Some(result) = self.try_env_var(platform) {
@@ -73,18 +77,21 @@ impl TokenResolver {
         None
     }
 
-    fn try_env_var(&self, platform: &PlatformKind) -> Option<(String, TokenSource)> {
+    fn try_env_var(&self, platform: &PlatformKind) -> Option<(SecretString, TokenSource)> {
         for var_name in platform.env_var_names() {
             if let Ok(token) = std::env::var(var_name) {
                 if !token.is_empty() {
-                    return Some((token, TokenSource::EnvVar((*var_name).to_string())));
+                    return Some((
+                        SecretString::new(token),
+                        TokenSource::EnvVar((*var_name).to_string()),
+                    ));
                 }
             }
         }
         None
     }
 
-    fn try_keyring(&self, platform: &PlatformKind) -> Option<(String, TokenSource)> {
+    fn try_keyring(&self, platform: &PlatformKind) -> Option<(SecretString, TokenSource)> {
         match self.store.get(platform) {
             Ok(Some(token)) => Some((token, TokenSource::Keyring)),
             Ok(None) => None,
@@ -99,27 +106,40 @@ impl TokenResolver {
         }
     }
 
-    fn try_cli_config(&self, platform: &PlatformKind) -> Option<(String, TokenSource)> {
+    fn try_cli_config(&self, platform: &PlatformKind) -> Option<(SecretString, TokenSource)> {
         match platform {
             PlatformKind::GitHub => {
                 if self.detection_config.detect_gh_cli {
-                    detect::detect_gh_token().map(|t| (t, TokenSource::CliConfig("gh".to_string())))
+                    detect::detect_gh_token().map(|t| {
+                        (
+                            SecretString::new(t),
+                            TokenSource::CliConfig("gh".to_string()),
+                        )
+                    })
                 } else {
                     None
                 }
             }
             PlatformKind::Railway => {
                 if self.detection_config.detect_railway_cli {
-                    detect::detect_railway_token()
-                        .map(|t| (t, TokenSource::CliConfig("railway".to_string())))
+                    detect::detect_railway_token().map(|t| {
+                        (
+                            SecretString::new(t),
+                            TokenSource::CliConfig("railway".to_string()),
+                        )
+                    })
                 } else {
                     None
                 }
             }
             PlatformKind::Vercel => {
                 if self.detection_config.detect_vercel_cli {
-                    detect::detect_vercel_token()
-                        .map(|t| (t, TokenSource::CliConfig("vercel".to_string())))
+                    detect::detect_vercel_token().map(|t| {
+                        (
+                            SecretString::new(t),
+                            TokenSource::CliConfig("vercel".to_string()),
+                        )
+                    })
                 } else {
                     None
                 }
@@ -132,6 +152,7 @@ impl TokenResolver {
 mod tests {
     use super::*;
     use crate::auth::credential_store::InMemoryStore;
+    use secrecy::ExposeSecret;
 
     fn test_resolver_with_store(store: Arc<InMemoryStore>) -> TokenResolver {
         TokenResolver::new(store, TokenDetectionConfig::default())
@@ -163,11 +184,11 @@ mod tests {
         store.set(&PlatformKind::GitHub, "keyring_token").unwrap();
 
         let resolver = test_resolver_with_store(store);
-        let result = resolver.resolve_with_source(&PlatformKind::GitHub);
-        assert_eq!(
-            result,
-            Some(("keyring_token".to_string(), TokenSource::Keyring))
-        );
+        let (token, source) = resolver
+            .resolve_with_source(&PlatformKind::GitHub)
+            .expect("should resolve");
+        assert_eq!(token.expose_secret(), "keyring_token");
+        assert_eq!(source, TokenSource::Keyring);
     }
 
     #[test]
@@ -191,11 +212,11 @@ mod tests {
             },
         );
 
-        let result = resolver.resolve_with_source(&PlatformKind::GitHub);
-        assert_eq!(
-            result,
-            Some(("keyring_token".to_string(), TokenSource::Keyring))
-        );
+        let (token, source) = resolver
+            .resolve_with_source(&PlatformKind::GitHub)
+            .expect("should resolve");
+        assert_eq!(token.expose_secret(), "keyring_token");
+        assert_eq!(source, TokenSource::Keyring);
 
         unsafe { std::env::remove_var("PULSOS_TEST_GH_TOKEN") };
     }
@@ -247,16 +268,25 @@ mod tests {
         );
 
         assert_eq!(
-            resolver.resolve(&PlatformKind::GitHub),
-            Some("gh_tok".to_string())
+            resolver
+                .resolve(&PlatformKind::GitHub)
+                .unwrap()
+                .expose_secret(),
+            "gh_tok"
         );
         assert_eq!(
-            resolver.resolve(&PlatformKind::Railway),
-            Some("rw_tok".to_string())
+            resolver
+                .resolve(&PlatformKind::Railway)
+                .unwrap()
+                .expose_secret(),
+            "rw_tok"
         );
         assert_eq!(
-            resolver.resolve(&PlatformKind::Vercel),
-            Some("vc_tok".to_string())
+            resolver
+                .resolve(&PlatformKind::Vercel)
+                .unwrap()
+                .expose_secret(),
+            "vc_tok"
         );
     }
 }

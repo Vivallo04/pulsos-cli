@@ -56,7 +56,7 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
         print!("    {:<12}", format!("{}:", platform.display_name()));
 
         match resolver.resolve_with_source(platform) {
-            Some((token, source)) => match validate_token(platform, &token, &cache).await {
+            Some((token, source)) => match validate_token(platform, token, &cache).await {
                 Ok(status) => {
                     println!("OK via {} ({})", source, status.identity);
                     for warning in &status.warnings {

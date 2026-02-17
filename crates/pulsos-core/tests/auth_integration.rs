@@ -6,6 +6,7 @@ use pulsos_core::config::types::TokenDetectionConfig;
 use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::PlatformAdapter;
 use pulsos_test::mock_server::MockGitHub;
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 
 // ── Token Resolver Integration ──
@@ -35,7 +36,7 @@ async fn resolve_token_from_keyring_and_validate_github() {
     let (token, source) = resolver
         .resolve_with_source(&PlatformKind::GitHub)
         .expect("Should resolve token from keyring");
-    assert_eq!(token, "test-github-token");
+    assert_eq!(token.expose_secret(), "test-github-token");
     assert_eq!(source, TokenSource::Keyring);
 
     // Validate via mock API
@@ -53,8 +54,11 @@ async fn validate_github_token_with_scopes() {
 
     // The mock returns x-oauth-scopes: "repo, read:org"
     // validate_token should return success with no warnings
-    let client =
-        GitHubClient::new_with_base_url("test-github-token".into(), mock.url(), cache.clone());
+    let client = GitHubClient::new_with_base_url(
+        SecretString::new("test-github-token".into()),
+        mock.url(),
+        cache.clone(),
+    );
     let status = client.validate_auth().await.unwrap();
 
     assert!(status.valid);
@@ -84,7 +88,7 @@ async fn resolve_railway_token_from_keyring() {
     let (token, source) = resolver
         .resolve_with_source(&PlatformKind::Railway)
         .expect("Should resolve Railway token");
-    assert_eq!(token, "test-railway-token");
+    assert_eq!(token.expose_secret(), "test-railway-token");
     assert_eq!(source, TokenSource::Keyring);
 }
 
@@ -124,13 +128,19 @@ async fn multiple_platforms_resolved_independently() {
     );
 
     assert_eq!(
-        resolver.resolve(&PlatformKind::GitHub),
-        Some("gh-token".to_string())
+        resolver
+            .resolve(&PlatformKind::GitHub)
+            .unwrap()
+            .expose_secret(),
+        "gh-token"
     );
     assert!(resolver.resolve(&PlatformKind::Railway).is_none());
     assert_eq!(
-        resolver.resolve(&PlatformKind::Vercel),
-        Some("vc-token".to_string())
+        resolver
+            .resolve(&PlatformKind::Vercel)
+            .unwrap()
+            .expose_secret(),
+        "vc-token"
     );
 }
 
@@ -148,15 +158,23 @@ fn in_memory_store_lifecycle() {
     // Set and get
     store.set(&PlatformKind::GitHub, "token1").unwrap();
     assert_eq!(
-        store.get(&PlatformKind::GitHub).unwrap(),
-        Some("token1".to_string())
+        store
+            .get(&PlatformKind::GitHub)
+            .unwrap()
+            .unwrap()
+            .expose_secret(),
+        "token1"
     );
 
     // Overwrite
     store.set(&PlatformKind::GitHub, "token2").unwrap();
     assert_eq!(
-        store.get(&PlatformKind::GitHub).unwrap(),
-        Some("token2".to_string())
+        store
+            .get(&PlatformKind::GitHub)
+            .unwrap()
+            .unwrap()
+            .expose_secret(),
+        "token2"
     );
 
     // Delete

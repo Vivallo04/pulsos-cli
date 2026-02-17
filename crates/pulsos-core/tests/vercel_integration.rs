@@ -3,6 +3,7 @@ use pulsos_core::domain::deployment::{DeploymentStatus, Platform};
 use pulsos_core::platform::vercel::client::VercelClient;
 use pulsos_core::platform::{PlatformAdapter, TrackedResource};
 use pulsos_test::mock_server::MockVercel;
+use secrecy::SecretString;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -10,7 +11,11 @@ async fn fetch_events_returns_deployments() {
     let mock = MockVercel::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = VercelClient::new_with_base_url("test-vercel-token".into(), mock.url(), cache);
+    let client = VercelClient::new_with_base_url(
+        SecretString::new("test-vercel-token".into()),
+        mock.url(),
+        cache,
+    );
 
     let tracked = vec![TrackedResource {
         platform_id: "my-saas-web".into(),
@@ -42,7 +47,11 @@ async fn validate_auth_succeeds() {
     let mock = MockVercel::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = VercelClient::new_with_base_url("test-vercel-token".into(), mock.url(), cache);
+    let client = VercelClient::new_with_base_url(
+        SecretString::new("test-vercel-token".into()),
+        mock.url(),
+        cache,
+    );
 
     let status = client.validate_auth().await.unwrap();
     assert!(status.valid);
@@ -54,7 +63,11 @@ async fn discover_returns_projects() {
     let mock = MockVercel::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = VercelClient::new_with_base_url("test-vercel-token".into(), mock.url(), cache);
+    let client = VercelClient::new_with_base_url(
+        SecretString::new("test-vercel-token".into()),
+        mock.url(),
+        cache,
+    );
 
     let resources = client.discover().await.unwrap();
     assert_eq!(resources.len(), 1);

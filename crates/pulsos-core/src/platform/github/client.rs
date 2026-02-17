@@ -6,6 +6,7 @@ use crate::platform::{
 };
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -14,17 +15,21 @@ use super::types::{GhRateLimit, GhRepo, GhUser, WorkflowRun, WorkflowRunsRespons
 pub struct GitHubClient {
     client: reqwest::Client,
     base_url: String,
-    token: String,
+    token: SecretString,
     cache: Arc<CacheStore>,
     rate_limit: RwLock<Option<GhRateLimit>>,
 }
 
 impl GitHubClient {
-    pub fn new(token: String, cache: Arc<CacheStore>) -> Self {
+    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Self {
         Self::new_with_base_url(token, "https://api.github.com".into(), cache)
     }
 
-    pub fn new_with_base_url(token: String, base_url: String, cache: Arc<CacheStore>) -> Self {
+    pub fn new_with_base_url(
+        token: SecretString,
+        base_url: String,
+        cache: Arc<CacheStore>,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
             .build()
@@ -41,12 +46,11 @@ impl GitHubClient {
 
     fn auth_headers(&self) -> Result<HeaderMap, PulsosError> {
         let mut headers = HeaderMap::new();
-        let auth = HeaderValue::from_str(&format!("Bearer {}", self.token)).map_err(|e| {
-            PulsosError::AuthFailed {
+        let auth = HeaderValue::from_str(&format!("Bearer {}", self.token.expose_secret()))
+            .map_err(|e| PulsosError::AuthFailed {
                 platform: "GitHub".into(),
                 reason: format!("Invalid token format for Authorization header: {e}"),
-            }
-        })?;
+            })?;
         headers.insert(AUTHORIZATION, auth);
         headers.insert(
             ACCEPT,

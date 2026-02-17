@@ -5,6 +5,7 @@ use crate::platform::{
     AuthStatus, DiscoveredResource, PlatformAdapter, RateLimitInfo, TrackedResource,
 };
 use chrono::Utc;
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 
 use super::types::{DeploymentsData, GqlResponse, MeData, ProjectsData, RwDeployment, TeamsData};
@@ -12,12 +13,12 @@ use super::types::{DeploymentsData, GqlResponse, MeData, ProjectsData, RwDeploym
 pub struct RailwayClient {
     client: reqwest::Client,
     base_url: String,
-    token: String,
+    token: SecretString,
     cache: Arc<CacheStore>,
 }
 
 impl RailwayClient {
-    pub fn new(token: String, cache: Arc<CacheStore>) -> Self {
+    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Self {
         Self::new_with_base_url(
             token,
             "https://backboard.railway.com/graphql/v2".into(),
@@ -25,7 +26,11 @@ impl RailwayClient {
         )
     }
 
-    pub fn new_with_base_url(token: String, base_url: String, cache: Arc<CacheStore>) -> Self {
+    pub fn new_with_base_url(
+        token: SecretString,
+        base_url: String,
+        cache: Arc<CacheStore>,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
             .build()
@@ -52,7 +57,10 @@ impl RailwayClient {
         let resp = self
             .client
             .post(&self.base_url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.token.expose_secret()),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
