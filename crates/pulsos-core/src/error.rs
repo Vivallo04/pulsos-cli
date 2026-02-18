@@ -103,7 +103,80 @@ impl PulsosError {
                  Create a new token with the correct scopes."
             ),
             Self::NoConfig => "No configuration found. Run `pulsos` to set up.".to_string(),
-            _ => self.to_string(),
+
+            Self::ApiError {
+                platform,
+                status,
+                body,
+            } => {
+                let hint = match *status {
+                    400 => "The request was malformed. This may be a bug in pulsos.".to_string(),
+                    403 => format!(
+                        "Access denied. Check your {platform} token permissions."
+                    ),
+                    404 => "The resource was not found. It may have been deleted or you may lack access.".to_string(),
+                    500..=599 => format!(
+                        "{platform} is experiencing server issues. Try again later."
+                    ),
+                    _ => format!("Unexpected HTTP {status} from {platform}."),
+                };
+                let body_preview = if body.len() > 200 {
+                    format!("{}...", &body[..200])
+                } else {
+                    body.clone()
+                };
+                format!(
+                    "{platform} API error (HTTP {status}).\n\n\
+                     {hint}\n\n\
+                     Response: {body_preview}\n\n\
+                     Run `pulsos doctor` to check your configuration."
+                )
+            }
+
+            Self::GraphqlError { platform, message } => format!(
+                "{platform} GraphQL query failed: {message}\n\n\
+                 This may indicate:\n\
+                 1. An API schema change on {platform}\n\
+                 2. Insufficient permissions for this query\n\
+                 3. A temporary {platform} service issue\n\n\
+                 Run `pulsos doctor` to verify your authentication."
+            ),
+
+            Self::ParseError { platform, message } => format!(
+                "Failed to parse {platform} response: {message}\n\n\
+                 This usually means the API returned an unexpected format.\n\
+                 If this persists, please report it at:\n\
+                   https://github.com/lambdahq/pulsos/issues"
+            ),
+
+            Self::Config(detail) => format!(
+                "Configuration error: {detail}\n\n\
+                 Check your config file at ~/.config/pulsos/config.toml\n\
+                 Run `pulsos repos sync` to regenerate the configuration."
+            ),
+
+            Self::Cache(detail) => format!(
+                "Cache error: {detail}\n\n\
+                 Try clearing the cache:\n\
+                   rm -rf ~/.cache/pulsos/\n\n\
+                 Pulsos will rebuild the cache automatically on the next run."
+            ),
+
+            Self::Keyring(detail) => format!(
+                "Credential store error: {detail}\n\n\
+                 Your OS keyring may be locked or unavailable.\n\
+                 Possible fixes:\n\
+                 1. Unlock your keyring (e.g., login keychain on macOS)\n\
+                 2. Use environment variables instead: set GH_TOKEN, RAILWAY_TOKEN, VERCEL_TOKEN\n\
+                 3. Re-authenticate: `pulsos auth github`"
+            ),
+
+            Self::Other(e) => format!(
+                "Unexpected error: {e}\n\n\
+                 If this persists, please report it at:\n\
+                   https://github.com/lambdahq/pulsos/issues\n\n\
+                 Include the output of `pulsos doctor` in your report."
+            ),
         }
     }
 }
@@ -171,5 +244,100 @@ mod tests {
         let err: PulsosError = anyhow_err.into();
         assert!(matches!(err, PulsosError::Other(_)));
         assert!(err.to_string().contains("something went wrong"));
+    }
+
+    #[test]
+    fn api_error_403_user_message() {
+        let err = PulsosError::ApiError {
+            platform: "GitHub".into(),
+            status: 403,
+            body: "Forbidden".into(),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("HTTP 403"));
+        assert!(msg.contains("token permissions"));
+        assert!(msg.contains("pulsos doctor"));
+    }
+
+    #[test]
+    fn api_error_500_user_message() {
+        let err = PulsosError::ApiError {
+            platform: "Vercel".into(),
+            status: 500,
+            body: "Internal Server Error".into(),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("HTTP 500"));
+        assert!(msg.contains("server issues"));
+    }
+
+    #[test]
+    fn api_error_truncates_long_body() {
+        let err = PulsosError::ApiError {
+            platform: "Vercel".into(),
+            status: 500,
+            body: "x".repeat(500),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("..."));
+        // The body preview should be 200 chars + "..."
+        assert!(!msg.contains(&"x".repeat(300)));
+    }
+
+    #[test]
+    fn graphql_error_user_message() {
+        let err = PulsosError::GraphqlError {
+            platform: "Railway".into(),
+            message: "field not found".into(),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("Railway"));
+        assert!(msg.contains("GraphQL"));
+        assert!(msg.contains("pulsos doctor"));
+    }
+
+    #[test]
+    fn parse_error_user_message() {
+        let err = PulsosError::ParseError {
+            platform: "GitHub".into(),
+            message: "expected object".into(),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("unexpected format"));
+        assert!(msg.contains("github.com/lambdahq/pulsos/issues"));
+    }
+
+    #[test]
+    fn config_error_user_message() {
+        let err = PulsosError::Config("invalid TOML".into());
+        let msg = err.user_message();
+        assert!(msg.contains("invalid TOML"));
+        assert!(msg.contains("config.toml"));
+        assert!(msg.contains("pulsos repos sync"));
+    }
+
+    #[test]
+    fn cache_error_user_message() {
+        let err = PulsosError::Cache("corrupted".into());
+        let msg = err.user_message();
+        assert!(msg.contains("corrupted"));
+        assert!(msg.contains("rm -rf"));
+    }
+
+    #[test]
+    fn keyring_error_user_message() {
+        let err = PulsosError::Keyring("access denied".into());
+        let msg = err.user_message();
+        assert!(msg.contains("keyring"));
+        assert!(msg.contains("GH_TOKEN"));
+        assert!(msg.contains("pulsos auth"));
+    }
+
+    #[test]
+    fn other_error_user_message() {
+        let err = PulsosError::Other(anyhow::anyhow!("weird failure"));
+        let msg = err.user_message();
+        assert!(msg.contains("weird failure"));
+        assert!(msg.contains("pulsos doctor"));
     }
 }

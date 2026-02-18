@@ -51,7 +51,7 @@ pub fn render(events: &[DeploymentEvent]) {
     println!("{table}");
 }
 
-fn status_indicator(status: &DeploymentStatus) -> String {
+pub(crate) fn status_indicator(status: &DeploymentStatus) -> String {
     match status {
         DeploymentStatus::Success => "OK".into(),
         DeploymentStatus::Failed => "FAIL".into(),
@@ -65,7 +65,7 @@ fn status_indicator(status: &DeploymentStatus) -> String {
     }
 }
 
-fn format_age(created_at: chrono::DateTime<Utc>) -> String {
+pub(crate) fn format_age(created_at: chrono::DateTime<Utc>) -> String {
     let diff = Utc::now() - created_at;
     let secs = diff.num_seconds();
     if secs < 60 {
@@ -79,7 +79,7 @@ fn format_age(created_at: chrono::DateTime<Utc>) -> String {
     }
 }
 
-fn format_duration(secs: u64) -> String {
+pub(crate) fn format_duration(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")
     } else if secs < 3600 {

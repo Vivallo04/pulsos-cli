@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct PulsosConfig {
     #[serde(default)]
     pub auth: AuthConfig,
@@ -23,7 +23,7 @@ pub struct PulsosConfig {
 
 // ── Authentication ──
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthConfig {
     #[serde(default = "default_github_host")]
     pub github_host: String,
@@ -73,13 +73,13 @@ fn default_true() -> bool {
 
 // ── GitHub ──
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct GitHubConfig {
     #[serde(default)]
     pub organizations: Vec<OrgConfig>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrgConfig {
     pub name: String,
     #[serde(default)]
@@ -92,13 +92,13 @@ pub struct OrgConfig {
 
 // ── Railway ──
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct RailwayConfig {
     #[serde(default)]
     pub workspaces: Vec<WorkspaceConfig>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceConfig {
     pub name: String,
     pub id: Option<String>,
@@ -116,13 +116,13 @@ fn default_production() -> String {
 
 // ── Vercel ──
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct VercelConfig {
     #[serde(default)]
     pub teams: Vec<TeamConfig>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TeamConfig {
     pub name: String,
     pub id: Option<String>,
@@ -134,7 +134,7 @@ pub struct TeamConfig {
 
 // ── Correlations ──
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CorrelationConfig {
     pub name: String,
     pub github_repo: Option<String>,
@@ -149,7 +149,7 @@ pub struct CorrelationConfig {
 
 // ── Views ──
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ViewConfig {
     pub name: String,
     pub description: Option<String>,
@@ -172,7 +172,7 @@ fn default_refresh() -> u64 {
 
 // ── TUI ──
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TuiConfig {
     #[serde(default = "default_refresh")]
     pub refresh_interval: u64,
@@ -216,7 +216,7 @@ fn default_unified() -> String {
 
 // ── Cache ──
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CacheConfig {
     pub directory: Option<String>,
     #[serde(default = "default_cache_mb")]

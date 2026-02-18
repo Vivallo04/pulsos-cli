@@ -63,13 +63,17 @@ impl<T> CacheEntry<T> {
 /// Persistent cache backed by sled.
 pub struct CacheStore {
     db: sled::Db,
+    path: std::path::PathBuf,
 }
 
 impl CacheStore {
     pub fn open(path: &Path) -> Result<Self, PulsosError> {
         let db = sled::open(path)
             .map_err(|e| PulsosError::Cache(format!("Failed to open cache: {e}")))?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            path: path.to_path_buf(),
+        })
     }
 
     /// Default cache path: ~/.cache/pulsos/
@@ -137,6 +141,55 @@ impl CacheStore {
     pub fn is_empty(&self) -> bool {
         self.db.is_empty()
     }
+
+    /// Returns the age of the oldest entry in the cache, if any.
+    pub fn oldest_entry_age(&self) -> Option<Duration> {
+        let mut oldest: Option<DateTime<Utc>> = None;
+
+        for (_key, bytes) in self.db.iter().flatten() {
+            // Deserialize only the `fetched_at` field to avoid needing the generic `T`.
+            if let Ok(meta) = serde_json::from_slice::<CacheMeta>(&bytes) {
+                match oldest {
+                    None => oldest = Some(meta.fetched_at),
+                    Some(prev) if meta.fetched_at < prev => oldest = Some(meta.fetched_at),
+                    _ => {}
+                }
+            }
+        }
+
+        oldest.map(|ts| {
+            let secs = (Utc::now() - ts).num_seconds().max(0) as u64;
+            Duration::from_secs(secs)
+        })
+    }
+
+    /// Returns the on-disk size of the cache directory in bytes.
+    pub fn disk_size(&self) -> u64 {
+        dir_size(&self.path)
+    }
+}
+
+/// Minimal struct to deserialize only the `fetched_at` field from cache entries.
+#[derive(Deserialize)]
+struct CacheMeta {
+    fetched_at: DateTime<Utc>,
+}
+
+/// Recursively compute the total size of all files in a directory.
+fn dir_size(path: &Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    total += dir_size(&entry.path());
+                } else {
+                    total += meta.len();
+                }
+            }
+        }
+    }
+    total
 }
 
 #[cfg(test)]
@@ -217,5 +270,38 @@ mod tests {
         assert_eq!(restored.data, vec!["hello", "world"]);
         assert_eq!(restored.ttl_secs, 60);
         assert_eq!(restored.etag, Some("etag".into()));
+    }
+
+    #[test]
+    fn oldest_entry_age_empty_cache() {
+        let (cache, _dir) = temp_cache();
+        assert!(cache.oldest_entry_age().is_none());
+    }
+
+    #[test]
+    fn oldest_entry_age_single_entry() {
+        let (cache, _dir) = temp_cache();
+        cache.set("key1", "value", 30, None).unwrap();
+        let age = cache.oldest_entry_age().unwrap();
+        // Just created, so age should be very small.
+        assert!(age.as_secs() < 5);
+    }
+
+    #[test]
+    fn oldest_entry_age_multiple_entries() {
+        let (cache, _dir) = temp_cache();
+        cache.set("key1", "a", 30, None).unwrap();
+        cache.set("key2", "b", 30, None).unwrap();
+        cache.set("key3", "c", 30, None).unwrap();
+        // All just created, so oldest should still be very recent.
+        let age = cache.oldest_entry_age().unwrap();
+        assert!(age.as_secs() < 5);
+    }
+
+    #[test]
+    fn disk_size_non_zero() {
+        let (cache, _dir) = temp_cache();
+        cache.set("key1", "some data here", 30, None).unwrap();
+        assert!(cache.disk_size() > 0);
     }
 }

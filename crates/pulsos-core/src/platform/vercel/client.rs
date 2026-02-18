@@ -149,6 +149,83 @@ impl VercelClient {
             },
         }
     }
+
+    /// Like `discover()`, but also returns the linked GitHub repo for each project.
+    ///
+    /// This is used by the `repos sync` command to auto-correlate Vercel → GitHub.
+    pub async fn discover_with_links(
+        &self,
+    ) -> Result<Vec<(DiscoveredResource, Option<String>)>, PulsosError> {
+        let mut results = Vec::new();
+
+        let teams_url = format!("{}/v2/teams", self.base_url);
+        let resp = self
+            .client
+            .get(&teams_url)
+            .headers(self.auth_headers())
+            .send()
+            .await
+            .map_err(|e| PulsosError::Network {
+                platform: "Vercel".into(),
+                message: e.to_string(),
+                source: Some(e),
+            })?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(PulsosError::ApiError {
+                platform: "Vercel".into(),
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let teams: TeamsResponse = resp.json().await.map_err(|e| PulsosError::ParseError {
+            platform: "Vercel".into(),
+            message: e.to_string(),
+        })?;
+
+        for team in &teams.teams {
+            let projects_url = format!("{}/v9/projects?teamId={}", self.base_url, team.id);
+            let resp = self
+                .client
+                .get(&projects_url)
+                .headers(self.auth_headers())
+                .send()
+                .await
+                .map_err(|e| PulsosError::Network {
+                    platform: "Vercel".into(),
+                    message: e.to_string(),
+                    source: Some(e),
+                })?;
+
+            if resp.status().is_success() {
+                let projects: ProjectsResponse =
+                    resp.json().await.map_err(|e| PulsosError::ParseError {
+                        platform: "Vercel".into(),
+                        message: e.to_string(),
+                    })?;
+
+                for proj in &projects.projects {
+                    let linked_repo = proj.link.as_ref().and_then(|l| l.repo.clone());
+                    results.push((
+                        DiscoveredResource {
+                            platform_id: proj.id.clone(),
+                            display_name: proj.name.clone(),
+                            group: team.name.clone(),
+                            group_type: "team".into(),
+                            archived: false,
+                            disabled: false,
+                        },
+                        linked_repo,
+                    ));
+                }
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 impl PlatformAdapter for VercelClient {

@@ -81,6 +81,29 @@ impl MockRailway {
             .mount(&server)
             .await;
 
+        // POST /graphql/v2 — teams query (must be mounted before "me" since
+        // "teams" is more specific and wiremock uses last-mounted-wins priority)
+        Mock::given(method("POST"))
+            .and(path("/graphql/v2"))
+            .and(wiremock::matchers::body_string_contains("teams"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(fixtures::railway::teams_response()),
+            )
+            .named("railway-teams")
+            .mount(&server)
+            .await;
+
+        // POST /graphql/v2 — projects query
+        Mock::given(method("POST"))
+            .and(path("/graphql/v2"))
+            .and(wiremock::matchers::body_string_contains("projects"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(fixtures::railway::projects_response()),
+            )
+            .named("railway-projects")
+            .mount(&server)
+            .await;
+
         // POST /graphql/v2 — me query
         Mock::given(method("POST"))
             .and(path("/graphql/v2"))

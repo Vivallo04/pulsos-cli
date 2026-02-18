@@ -1,9 +1,9 @@
 //! Detects tokens from existing CLI tool configuration files.
 //!
 //! Supports:
-//! - GitHub CLI (`gh`): `~/.config/gh/hosts.yml`
+//! - GitHub CLI (`gh`): `~/.config/gh/hosts.yml` (or `$GH_CONFIG_DIR/hosts.yml`)
 //! - Railway CLI: `~/.railway/config.json`
-//! - Vercel CLI: `~/.config/com.vercel.cli/auth.json` or `~/.vercel/auth.json`
+//! - Vercel CLI: `$XDG_DATA_HOME/com.vercel.cli/auth.json` (or `~/.vercel/auth.json`)
 
 use std::path::{Path, PathBuf};
 
@@ -71,12 +71,22 @@ fn railway_config_path() -> Option<PathBuf> {
 fn vercel_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // New location: ~/.config/com.vercel.cli/auth.json
-    if let Some(config_dir) = dirs::config_dir() {
-        paths.push(config_dir.join("com.vercel.cli").join("auth.json"));
+    // Primary: XDG data dir (correct per Vercel docs).
+    // On macOS, data_dir() and config_dir() both return ~/Library/Application Support.
+    // On Linux, data_dir() returns ~/.local/share (the correct XDG_DATA_HOME).
+    if let Some(data_dir) = dirs::data_dir() {
+        paths.push(data_dir.join("com.vercel.cli").join("auth.json"));
     }
 
-    // Old location: ~/.vercel/auth.json
+    // Secondary: XDG config dir (backward compat; same as data_dir on macOS).
+    if let Some(config_dir) = dirs::config_dir() {
+        let config_path = config_dir.join("com.vercel.cli").join("auth.json");
+        if !paths.contains(&config_path) {
+            paths.push(config_path);
+        }
+    }
+
+    // Legacy: ~/.vercel/auth.json
     if let Some(home) = dirs::home_dir() {
         paths.push(home.join(".vercel").join("auth.json"));
     }

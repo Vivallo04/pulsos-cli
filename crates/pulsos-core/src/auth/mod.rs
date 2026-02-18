@@ -34,7 +34,7 @@ impl PlatformKind {
     /// Environment variable names to check (in priority order).
     pub fn env_var_names(&self) -> &'static [&'static str] {
         match self {
-            Self::GitHub => &["GITHUB_TOKEN", "GH_TOKEN"],
+            Self::GitHub => &["GH_TOKEN", "GITHUB_TOKEN"],
             Self::Railway => &["RAILWAY_TOKEN", "RAILWAY_API_TOKEN"],
             Self::Vercel => &["VERCEL_TOKEN"],
         }
@@ -73,7 +73,7 @@ mod tests {
     fn platform_kind_env_vars() {
         assert_eq!(
             PlatformKind::GitHub.env_var_names(),
-            &["GITHUB_TOKEN", "GH_TOKEN"]
+            &["GH_TOKEN", "GITHUB_TOKEN"]
         );
         assert_eq!(
             PlatformKind::Railway.env_var_names(),

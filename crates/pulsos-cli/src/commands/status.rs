@@ -12,6 +12,7 @@ use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::railway::client::RailwayClient;
 use pulsos_core::platform::vercel::client::VercelClient;
 use pulsos_core::platform::{PlatformAdapter, TrackedResource};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -43,14 +44,40 @@ pub async fn execute(
     _no_color: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    let config = load_config(config_path).map_err(|e| match e {
-        PulsosError::NoConfig => {
-            anyhow::anyhow!(
-                "No configuration found. Run `pulsos repos sync` to discover and track your projects."
-            )
+    let config = match load_config(config_path) {
+        Ok(c) => c,
+        Err(PulsosError::NoConfig) => {
+            if std::io::stdout().is_terminal() {
+                eprintln!("No configuration found.\n");
+                let run_sync = dialoguer::Confirm::new()
+                    .with_prompt("Would you like to discover and track your projects now?")
+                    .default(true)
+                    .interact()
+                    .unwrap_or(false);
+
+                if run_sync {
+                    let sync_args = super::repos::ReposArgs { command: None };
+                    super::repos::execute(sync_args, config_path).await?;
+
+                    // Re-load the config that repos sync just saved.
+                    load_config(config_path).map_err(|_| {
+                        anyhow::anyhow!(
+                            "Sync completed but no config was saved. Run `pulsos repos sync` manually."
+                        )
+                    })?
+                } else {
+                    anyhow::bail!("Run `pulsos repos sync` to discover and track your projects.");
+                }
+            } else {
+                anyhow::bail!(
+                    "No configuration found. Run `pulsos repos sync` to discover and track your projects."
+                );
+            }
         }
-        other => anyhow::anyhow!("{}", other.user_message()),
-    })?;
+        Err(other) => {
+            anyhow::bail!("{}", other.user_message());
+        }
+    };
 
     let cache = Arc::new(CacheStore::open_default()?);
     let store = Arc::new(KeyringStore::new());
@@ -200,9 +227,9 @@ pub async fn execute(
     // Sort by created_at descending
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
+    // Watch mode — launch the live TUI dashboard.
     if args.watch {
-        warnings
-            .push("--watch mode is not implemented yet; showing a single snapshot instead.".into());
+        return crate::tui::run_tui(config).await;
     }
 
     // Output

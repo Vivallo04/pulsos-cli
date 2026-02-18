@@ -1,7 +1,8 @@
 mod commands;
 mod output;
+mod tui;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use output::OutputFormat;
 use std::path::PathBuf;
 
@@ -45,6 +46,12 @@ enum Commands {
     Views(commands::views::ViewsArgs),
     /// Diagnostics and troubleshooting
     Doctor(commands::doctor::DoctorArgs),
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell to generate completions for (bash, zsh, fish, powershell, elvish)
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[tokio::main]
@@ -69,9 +76,14 @@ async fn main() {
             commands::status::execute(args, cli.format, cli.no_color, config_path).await
         }
         Some(Commands::Auth(args)) => commands::auth::execute(args, config_path).await,
-        Some(Commands::Repos(args)) => commands::repos::execute(args).await,
+        Some(Commands::Repos(args)) => commands::repos::execute(args, config_path).await,
         Some(Commands::Views(args)) => commands::views::execute(args).await,
         Some(Commands::Doctor(args)) => commands::doctor::execute(args, config_path).await,
+        Some(Commands::Completions { shell }) => {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, "pulsos", &mut std::io::stdout());
+            Ok(())
+        }
         None => {
             // Default: run status
             let args = commands::status::StatusArgs {
@@ -88,5 +100,15 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("Error: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_cli_structure() {
+        Cli::command().debug_assert();
     }
 }
