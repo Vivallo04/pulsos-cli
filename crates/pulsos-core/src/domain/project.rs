@@ -84,7 +84,7 @@ impl std::fmt::Display for Confidence {
 
 /// A correlated deployment event — links events across platforms
 /// for the same commit/deployment.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CorrelatedEvent {
     pub commit_sha: Option<String>,
     pub github: Option<DeploymentEvent>,

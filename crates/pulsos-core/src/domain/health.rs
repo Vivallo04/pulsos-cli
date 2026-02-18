@@ -1,4 +1,7 @@
-use super::deployment::DeploymentStatus;
+use super::deployment::{DeploymentStatus, Platform};
+use crate::config::types::CorrelationConfig;
+use crate::correlation::event_matches_project;
+use crate::domain::deployment::DeploymentEvent;
 
 /// Health score computation for a unified project.
 ///
@@ -65,6 +68,59 @@ impl HealthCalculator {
             DeploymentStatus::Unknown(_) => 0.5,
         }
     }
+}
+
+/// Compute per-project health scores using correlation configs and fetched events.
+///
+/// For each correlation, filters events by project match and delegates to
+/// `HealthCalculator::compute`.
+pub fn compute_project_health_scores(
+    correlations: &[CorrelationConfig],
+    events: &[DeploymentEvent],
+) -> Vec<(String, u8)> {
+    let mut scores = Vec::new();
+
+    for corr in correlations {
+        let github_runs: Vec<DeploymentStatus> = if corr.github_repo.is_some() {
+            events
+                .iter()
+                .filter(|e| {
+                    e.platform == Platform::GitHub
+                        && e.metadata.workflow_name.is_some()
+                        && event_matches_project(e, corr)
+                })
+                .take(10)
+                .map(|e| e.status.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let railway_status = if corr.railway_project.is_some() {
+            events
+                .iter()
+                .filter(|e| e.platform == Platform::Railway && event_matches_project(e, corr))
+                .max_by_key(|e| e.created_at)
+                .map(|e| e.status.clone())
+        } else {
+            None
+        };
+
+        let vercel_status = if corr.vercel_project.is_some() {
+            events
+                .iter()
+                .filter(|e| e.platform == Platform::Vercel && event_matches_project(e, corr))
+                .max_by_key(|e| e.created_at)
+                .map(|e| e.status.clone())
+        } else {
+            None
+        };
+
+        let score = HealthCalculator::compute(&github_runs, railway_status, vercel_status);
+        scores.push((corr.name.clone(), score));
+    }
+
+    scores
 }
 
 #[cfg(test)]

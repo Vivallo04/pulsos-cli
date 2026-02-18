@@ -1,34 +1,69 @@
 use chrono::Utc;
-use pulsos_core::domain::deployment::{DeploymentEvent, DeploymentStatus};
+use pulsos_core::domain::deployment::DeploymentStatus;
+use pulsos_core::domain::project::{Confidence, CorrelatedEvent};
 
-pub fn render(events: &[DeploymentEvent]) {
+pub fn render_correlated(events: &[CorrelatedEvent]) {
     if events.is_empty() {
         println!("No deployment events found.");
         return;
     }
 
-    for event in events {
-        let status = match event.status {
-            DeploymentStatus::Success => "OK",
-            DeploymentStatus::Failed => "FAIL",
-            DeploymentStatus::InProgress => "RUN",
-            DeploymentStatus::Queued => "QUE",
-            DeploymentStatus::Cancelled => "CAN",
-            DeploymentStatus::Skipped => "SKP",
-            DeploymentStatus::ActionRequired => "ACT",
-            DeploymentStatus::Sleeping => "SLP",
-            DeploymentStatus::Unknown(_) => "???",
+    for c in events {
+        let conf = match c.confidence {
+            Confidence::Exact => "EXACT",
+            Confidence::High => " HIGH",
+            Confidence::Low => "  LOW",
+            Confidence::Unmatched => "    ?",
         };
 
-        let age = format_age_compact(event.created_at);
-        let title = event
-            .title
-            .clone()
-            .unwrap_or_else(|| event.id.chars().take(12).collect::<String>());
-        let platform = &event.platform;
-        let branch = event.branch.as_deref().unwrap_or("-");
+        let sha = c
+            .commit_sha
+            .as_deref()
+            .map(|s| if s.len() > 7 { &s[..7] } else { s })
+            .unwrap_or("-------");
 
-        println!("[{status:>4}] {platform} | {title} ({branch}) {age}");
+        let gh = c
+            .github
+            .as_ref()
+            .map(|e| status_compact(&e.status))
+            .unwrap_or("--");
+
+        let rw = c
+            .railway
+            .as_ref()
+            .map(|e| status_compact(&e.status))
+            .unwrap_or("--");
+
+        let vc = c
+            .vercel
+            .as_ref()
+            .map(|e| status_compact(&e.status))
+            .unwrap_or("--");
+
+        let branch = c
+            .github
+            .as_ref()
+            .and_then(|e| e.branch.as_deref())
+            .or_else(|| c.vercel.as_ref().and_then(|e| e.branch.as_deref()))
+            .unwrap_or("-");
+
+        let age = format_age_compact(c.timestamp);
+
+        println!("[{conf}] {sha}  GH:{gh}  RW:{rw}  VC:{vc}  {branch}  {age}");
+    }
+}
+
+fn status_compact(status: &DeploymentStatus) -> &'static str {
+    match status {
+        DeploymentStatus::Success => "OK",
+        DeploymentStatus::Failed => "FAIL",
+        DeploymentStatus::InProgress => "RUN",
+        DeploymentStatus::Queued => "QUE",
+        DeploymentStatus::Cancelled => "CAN",
+        DeploymentStatus::Skipped => "SKP",
+        DeploymentStatus::ActionRequired => "ACT",
+        DeploymentStatus::Sleeping => "SLP",
+        DeploymentStatus::Unknown(_) => "???",
     }
 }
 

@@ -6,7 +6,9 @@ use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::load_config;
+use pulsos_core::correlation;
 use pulsos_core::domain::deployment::DeploymentEvent;
+use pulsos_core::domain::health;
 use pulsos_core::error::PulsosError;
 use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::railway::client::RailwayClient;
@@ -232,11 +234,20 @@ pub async fn execute(
         return crate::tui::run_tui(config).await;
     }
 
+    // Correlate events across platforms.
+    let correlated = correlation::correlate_all(&config.correlations, &all_events);
+
+    // Compute per-project health scores (0–100).
+    let health_scores = health::compute_project_health_scores(&config.correlations, &all_events);
+
     // Output
     match format {
-        OutputFormat::Table => output::table::render(&all_events),
-        OutputFormat::Json => output::json::render(&all_events)?,
-        OutputFormat::Compact => output::compact::render(&all_events),
+        OutputFormat::Table => {
+            output::table::render_correlated(&correlated);
+            output::table::render_health_scores(&health_scores);
+        }
+        OutputFormat::Json => output::json::render_correlated_with_health(&correlated, &health_scores)?,
+        OutputFormat::Compact => output::compact::render_correlated(&correlated),
     }
 
     // Show warnings

@@ -19,6 +19,6 @@ pub enum ViewsCommand {
 }
 
 pub async fn execute(_args: ViewsArgs) -> anyhow::Result<()> {
-    eprintln!("Views commands are not yet implemented. Coming in Phase 3.");
+    eprintln!("Views commands are not yet implemented. Coming in Phase 4.");
     Ok(())
 }

@@ -40,6 +40,11 @@ pub enum ReposCommand {
         /// e.g. github:myorg/repo
         resource: String,
     },
+    /// Manually set or edit platform correlations for a project
+    Correlate {
+        /// Project name to edit (e.g. my-saas)
+        name: String,
+    },
 }
 
 pub async fn execute(args: ReposArgs, config_path: Option<&Path>) -> Result<()> {
@@ -48,6 +53,7 @@ pub async fn execute(args: ReposArgs, config_path: Option<&Path>) -> Result<()> 
         Some(ReposCommand::List) => list_command(config_path),
         Some(ReposCommand::Add { resource }) => add_command(&resource, config_path),
         Some(ReposCommand::Remove { resource }) => remove_command(&resource, config_path),
+        Some(ReposCommand::Correlate { name }) => correlate_command(&name, config_path),
     }
 }
 
@@ -389,6 +395,155 @@ fn remove_command(resource: &str, config_path: Option<&Path>) -> Result<()> {
     save_config(&config, config_path)?;
     println!("Removed {platform}:{id} from tracking.");
     Ok(())
+}
+
+fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
+    let mut config = load_config(config_path).map_err(|_| {
+        anyhow::anyhow!("No configuration found. Run `pulsos repos sync` to get started.")
+    })?;
+
+    // Find the correlation by name, or offer to create it.
+    let pos = config
+        .correlations
+        .iter()
+        .position(|c| c.name.eq_ignore_ascii_case(name));
+
+    let corr = if let Some(i) = pos {
+        config.correlations[i].clone()
+    } else {
+        let create = dialoguer::Confirm::new()
+            .with_prompt(format!("Project '{name}' not found. Create it?"))
+            .default(true)
+            .interact()?;
+        if !create {
+            println!("Cancelled.");
+            return Ok(());
+        }
+        CorrelationConfig {
+            name: name.to_string(),
+            github_repo: None,
+            railway_project: None,
+            railway_workspace: None,
+            railway_environment: None,
+            vercel_project: None,
+            vercel_team: None,
+            branch_mapping: HashMap::new(),
+        }
+    };
+
+    println!("Editing correlations for '{}'", corr.name);
+    println!("Press Enter to keep existing value. Type '-' to clear a field.");
+    println!();
+
+    // ── GitHub ──
+    let gh_current = corr.github_repo.clone().unwrap_or_else(|| "not set".into());
+    println!("  GitHub repo  (current: {gh_current})");
+    let gh_input: String = dialoguer::Input::new()
+        .with_prompt("  New value (e.g. myorg/my-saas)")
+        .allow_empty(true)
+        .with_initial_text(corr.github_repo.as_deref().unwrap_or(""))
+        .interact_text()?;
+
+    // ── Railway ──
+    let rw_current = corr.railway_project.clone().unwrap_or_else(|| "not set".into());
+    println!("  Railway project  (current: {rw_current})");
+    let rw_input: String = dialoguer::Input::new()
+        .with_prompt("  New value (project ID or name)")
+        .allow_empty(true)
+        .with_initial_text(corr.railway_project.as_deref().unwrap_or(""))
+        .interact_text()?;
+
+    let rw_ws_current = corr.railway_workspace.clone().unwrap_or_else(|| "not set".into());
+    println!("  Railway workspace  (current: {rw_ws_current})");
+    let rw_ws_input: String = dialoguer::Input::new()
+        .with_prompt("  New value (workspace name)")
+        .allow_empty(true)
+        .with_initial_text(corr.railway_workspace.as_deref().unwrap_or(""))
+        .interact_text()?;
+
+    // ── Vercel ──
+    let vc_current = corr.vercel_project.clone().unwrap_or_else(|| "not set".into());
+    println!("  Vercel project  (current: {vc_current})");
+    let vc_input: String = dialoguer::Input::new()
+        .with_prompt("  New value (project ID)")
+        .allow_empty(true)
+        .with_initial_text(corr.vercel_project.as_deref().unwrap_or(""))
+        .interact_text()?;
+
+    let vc_team_current = corr.vercel_team.clone().unwrap_or_else(|| "not set".into());
+    println!("  Vercel team  (current: {vc_team_current})");
+    let vc_team_input: String = dialoguer::Input::new()
+        .with_prompt("  New value (team name or slug)")
+        .allow_empty(true)
+        .with_initial_text(corr.vercel_team.as_deref().unwrap_or(""))
+        .interact_text()?;
+
+    // Build updated correlation.
+    let updated = CorrelationConfig {
+        name: corr.name.clone(),
+        github_repo: normalize_input(gh_input),
+        railway_project: normalize_input(rw_input),
+        railway_workspace: normalize_input(rw_ws_input),
+        railway_environment: corr.railway_environment.clone(),
+        vercel_project: normalize_input(vc_input),
+        vercel_team: normalize_input(vc_team_input),
+        branch_mapping: corr.branch_mapping.clone(),
+    };
+
+    // Show summary and confirm.
+    println!();
+    println!("Updated correlation for '{}':", updated.name);
+    if let Some(ref v) = updated.github_repo {
+        println!("  GitHub:  {v}");
+    } else {
+        println!("  GitHub:  (not set)");
+    }
+    if let Some(ref v) = updated.railway_project {
+        let ws = updated.railway_workspace.as_deref().unwrap_or("");
+        println!("  Railway: {v}  workspace: {ws}");
+    } else {
+        println!("  Railway: (not set)");
+    }
+    if let Some(ref v) = updated.vercel_project {
+        let team = updated.vercel_team.as_deref().unwrap_or("");
+        println!("  Vercel:  {v}  team: {team}");
+    } else {
+        println!("  Vercel:  (not set)");
+    }
+
+    println!();
+    let save = dialoguer::Confirm::new()
+        .with_prompt("Save?")
+        .default(true)
+        .interact()?;
+
+    if !save {
+        println!("Cancelled. No changes saved.");
+        return Ok(());
+    }
+
+    // Upsert into config.
+    match config.correlations.iter_mut().find(|c| c.name.eq_ignore_ascii_case(name)) {
+        Some(existing) => *existing = updated,
+        None => config.correlations.push(updated),
+    }
+
+    populate_platform_sections(&mut config);
+    save_config(&config, config_path)?;
+    println!("Saved. Run `pulsos status` to verify.");
+
+    Ok(())
+}
+
+/// Normalize interactive text input.
+/// Empty string → keep as None. "-" → explicitly clear to None.
+fn normalize_input(s: String) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 // ── Helpers ──

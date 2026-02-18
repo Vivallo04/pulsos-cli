@@ -1,53 +1,81 @@
 use chrono::Utc;
-use pulsos_core::domain::deployment::{DeploymentEvent, DeploymentStatus};
+use pulsos_core::domain::deployment::DeploymentStatus;
+use pulsos_core::domain::project::CorrelatedEvent;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 #[derive(Tabled)]
-struct EventRow {
-    #[tabled(rename = "Status")]
-    status: String,
-    #[tabled(rename = "Platform")]
-    platform: String,
-    #[tabled(rename = "Title")]
-    title: String,
+struct CorrelatedRow {
+    #[tabled(rename = "Conf")]
+    confidence: String,
+    #[tabled(rename = "SHA")]
+    sha: String,
+    #[tabled(rename = "GitHub")]
+    github: String,
+    #[tabled(rename = "Railway")]
+    railway: String,
+    #[tabled(rename = "Vercel")]
+    vercel: String,
     #[tabled(rename = "Branch")]
     branch: String,
-    #[tabled(rename = "Actor")]
-    actor: String,
     #[tabled(rename = "Age")]
     age: String,
-    #[tabled(rename = "Duration")]
-    duration: String,
 }
 
-pub fn render(events: &[DeploymentEvent]) {
+pub fn render_correlated(events: &[CorrelatedEvent]) {
     if events.is_empty() {
         println!("No deployment events found.");
         return;
     }
 
-    let rows: Vec<EventRow> = events
+    let rows: Vec<CorrelatedRow> = events
         .iter()
-        .map(|e| EventRow {
-            status: status_indicator(&e.status),
-            platform: e.platform.to_string(),
-            title: e
-                .title
-                .clone()
-                .unwrap_or_else(|| e.id.chars().take(12).collect()),
-            branch: e.branch.clone().unwrap_or_else(|| "-".into()),
-            actor: e.actor.clone().unwrap_or_else(|| "-".into()),
-            age: format_age(e.created_at),
-            duration: e
-                .duration_secs
-                .map(format_duration)
-                .unwrap_or_else(|| "-".into()),
+        .map(|c| {
+            let sha = c
+                .commit_sha
+                .as_deref()
+                .map(|s| if s.len() > 7 { &s[..7] } else { s })
+                .unwrap_or("-")
+                .to_string();
+
+            let github = c
+                .github
+                .as_ref()
+                .map(|e| status_indicator(&e.status))
+                .unwrap_or_else(|| "-".into());
+
+            let railway = c
+                .railway
+                .as_ref()
+                .map(|e| status_indicator(&e.status))
+                .unwrap_or_else(|| "-".into());
+
+            let vercel = c
+                .vercel
+                .as_ref()
+                .map(|e| status_indicator(&e.status))
+                .unwrap_or_else(|| "-".into());
+
+            let branch = c
+                .github
+                .as_ref()
+                .and_then(|e| e.branch.clone())
+                .or_else(|| c.vercel.as_ref().and_then(|e| e.branch.clone()))
+                .unwrap_or_else(|| "-".into());
+
+            CorrelatedRow {
+                confidence: c.confidence.to_string(),
+                sha,
+                github,
+                railway,
+                vercel,
+                branch,
+                age: format_age(c.timestamp),
+            }
         })
         .collect();
 
     let table = Table::new(&rows).with(Style::rounded()).to_string();
-
     println!("{table}");
 }
 
@@ -76,6 +104,34 @@ pub(crate) fn format_age(created_at: chrono::DateTime<Utc>) -> String {
         format!("{}h ago", secs / 3600)
     } else {
         format!("{}d ago", secs / 86400)
+    }
+}
+
+/// Render a per-project health score summary.
+///
+/// Example output:
+/// ```
+/// Project Health
+/// ─────────────────────────────────────────
+///   my-saas    100  ████████████████████
+///   api-core    72  ██████████████░░░░░░
+/// ```
+pub fn render_health_scores(scores: &[(String, u8)]) {
+    if scores.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("Project Health");
+    println!("{}", "─".repeat(45));
+
+    let name_width = scores.iter().map(|(n, _)| n.len()).max().unwrap_or(0).max(7);
+
+    for (name, score) in scores {
+        let filled = (*score as usize * 20) / 100;
+        let empty = 20 - filled;
+        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+        println!("  {:<width$}  {:>3}  {}", name, score, bar, width = name_width);
     }
 }
 
