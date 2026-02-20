@@ -1,6 +1,6 @@
 //! Tab 1: Unified Overview — correlated events across all platforms.
 //!
-//! Columns: Project(16) | GitHub CI(12) | Railway(12) | Vercel(12) | Branch(12) | Age(8)
+//! Columns: Project(16) | SHA(9) | Message(min 24) | GitHub CI(14) | Railway(12) | Vercel(10) | Branch(18) | Age(7)
 
 use ratatui::{
     layout::{Constraint, Rect},
@@ -17,9 +17,11 @@ use crate::tui::widgets::status_spans;
 /// Draw the Unified Overview table.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     // Header row (T4: bold + fg.subtle)
-    let header_cells = ["Project", "GitHub CI", "Railway", "Vercel", "Branch", "Age"]
-        .iter()
-        .map(|h| Cell::from(*h).style(theme.t4()));
+    let header_cells = [
+        "Project", "SHA", "Message", "GitHub CI", "Railway", "Vercel", "Branch", "Age",
+    ]
+    .iter()
+    .map(|h| Cell::from(*h).style(theme.t4()));
     let header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = app
@@ -49,6 +51,22 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 })
                 .unwrap_or("-")
                 .to_string();
+
+            // SHA cell: first 7 chars, blue accent
+            let sha = corr
+                .commit_sha
+                .as_deref()
+                .map(|s| if s.len() > 7 { &s[..7] } else { s })
+                .unwrap_or("-");
+
+            // Message cell: commit message from first available platform title
+            let message = corr
+                .github
+                .as_ref()
+                .and_then(|e| e.title.as_deref())
+                .or_else(|| corr.railway.as_ref().and_then(|e| e.title.as_deref()))
+                .or_else(|| corr.vercel.as_ref().and_then(|e| e.title.as_deref()))
+                .unwrap_or("-");
 
             // Status badge cells for each platform
             let gh_cell = match corr.github.as_ref() {
@@ -110,6 +128,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
             Row::new(vec![
                 Cell::from(Span::styled(project_name, theme.t5())),
+                Cell::from(Span::styled(sha.to_string(), theme.active())),
+                Cell::from(Span::styled(message.to_string(), theme.t7())),
                 gh_cell,
                 rw_cell,
                 vc_cell,
@@ -122,11 +142,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     let widths = [
         Constraint::Length(16), // Project
-        Constraint::Length(12), // GitHub CI
+        Constraint::Length(9),  // SHA
+        Constraint::Min(24),    // Message
+        Constraint::Length(14), // GitHub CI
         Constraint::Length(12), // Railway
-        Constraint::Length(12), // Vercel
-        Constraint::Length(12), // Branch
-        Constraint::Min(8),     // Age
+        Constraint::Length(10), // Vercel
+        Constraint::Length(18), // Branch
+        Constraint::Length(7),  // Age
     ];
 
     let table = Table::new(rows, widths)
@@ -225,7 +247,7 @@ mod tests {
 
     #[test]
     fn unified_tab_renders_without_panic() {
-        let backend = TestBackend::new(100, 20);
+        let backend = TestBackend::new(140, 20);
         let mut terminal = Terminal::new(backend).unwrap();
 
         let mut data = DataSnapshot::default();
@@ -249,6 +271,7 @@ mod tests {
         assert!(text.contains("passed"), "Should contain success status");
         assert!(text.contains("failed"), "Should contain failed status");
         assert!(text.contains("main"), "Should contain branch");
+        assert!(text.contains("abc123d"), "Should contain truncated SHA");
     }
 
     #[test]

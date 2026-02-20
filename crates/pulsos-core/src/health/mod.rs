@@ -36,10 +36,10 @@ impl PlatformHealthState {
     pub fn icon(self) -> &'static str {
         match self {
             Self::NoToken => "○",
-            Self::InvalidToken => "✗",
+            Self::InvalidToken => "✕",
             Self::ConnectivityError => "~",
             Self::AccessOrConfigIncomplete => "!",
-            Self::Ready => "✓",
+            Self::Ready => "●",
         }
     }
 }
@@ -658,6 +658,6 @@ mod tests {
         assert_eq!(PlatformHealthState::NoToken.label(), "No Token");
         assert_eq!(PlatformHealthState::NoToken.icon(), "○");
         assert_eq!(PlatformHealthState::Ready.label(), "Ready");
-        assert_eq!(PlatformHealthState::Ready.icon(), "✓");
+        assert_eq!(PlatformHealthState::Ready.icon(), "●");
     }
 }

@@ -22,7 +22,7 @@ use pulsos_core::domain::deployment::{DeploymentEvent, Platform};
 /// Draw the Platform Details table.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let header_cells = [
-        "Status", "Platform", "Title", "Detail", "Actor", "Age", "Dur",
+        "Status", "Platform", "Title", "SHA", "Detail", "Actor", "Age", "Dur",
     ]
     .iter()
     .map(|h| Cell::from(*h).style(theme.t4()));
@@ -67,14 +67,26 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 Span::styled(label, style),
             ]));
 
-            // Platform name — T6 (fg.default), no per-platform coloring
+            // Platform name — accent-colored per platform
             let platform_text = event.platform.to_string();
-            let platform_cell = Cell::from(Span::styled(platform_text, theme.t6()));
+            let platform_style = match event.platform {
+                Platform::GitHub => theme.gh_accent(),
+                Platform::Railway => theme.rw_accent(),
+                Platform::Vercel => theme.vc_accent(),
+            };
+            let platform_cell = Cell::from(Span::styled(platform_text, platform_style));
 
             let title = event
                 .title
                 .as_deref()
                 .unwrap_or_else(|| &event.id[..event.id.len().min(12)]);
+
+            // SHA cell: first 7 chars
+            let sha = event
+                .commit_sha
+                .as_deref()
+                .map(|s| if s.len() > 7 { &s[..7] } else { s })
+                .unwrap_or("-");
 
             let detail = platform_detail(event);
             let actor = event.actor.as_deref().unwrap_or("-");
@@ -88,6 +100,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 status_cell,
                 platform_cell,
                 Cell::from(Span::styled(title.to_string(), theme.t6())),
+                Cell::from(Span::styled(sha.to_string(), theme.active())),
                 Cell::from(Span::styled(detail, theme.t7())),
                 Cell::from(Span::styled(actor.to_string(), theme.t6())),
                 Cell::from(Span::styled(age, theme.t8())),
@@ -98,12 +111,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     let widths = [
         Constraint::Length(12), // Status
-        Constraint::Length(9),  // Platform
-        Constraint::Length(16), // Title
-        Constraint::Length(20), // Detail
+        Constraint::Length(8),  // Platform
+        Constraint::Length(22), // Title
+        Constraint::Length(9),  // SHA
+        Constraint::Min(36),    // Detail
         Constraint::Length(12), // Actor
-        Constraint::Length(10), // Age
-        Constraint::Min(6),     // Dur
+        Constraint::Length(7),  // Age
+        Constraint::Length(8),  // Dur
     ];
 
     let table = Table::new(rows, widths)
@@ -237,7 +251,7 @@ mod tests {
 
     #[test]
     fn platform_tab_renders_without_panic() {
-        let backend = TestBackend::new(100, 20);
+        let backend = TestBackend::new(140, 20);
         let mut terminal = Terminal::new(backend).unwrap();
 
         let mut data = DataSnapshot::default();
@@ -257,6 +271,7 @@ mod tests {
         assert!(text.contains("Railway"), "Should show Railway platform");
         assert!(text.contains("Vercel"), "Should show Vercel platform");
         assert!(text.contains("vivallo"), "Should show actor");
+        assert!(text.contains("abc123"), "Should show SHA");
     }
 
     #[test]

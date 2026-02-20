@@ -24,9 +24,9 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         return;
     }
 
-    // Split: header (3 lines) + main (flex) + footer (1 line)
+    // Split: header (2 lines) + main (flex) + footer (1 line)
     let chunks = Layout::vertical([
-        Constraint::Length(3), // Header: brand + tabs + underline
+        Constraint::Length(2), // Header: brand + tabs + underline
         Constraint::Min(5),    // Main content
         Constraint::Length(2), // Footer: key hints + log/warning line
     ])

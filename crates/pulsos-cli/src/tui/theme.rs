@@ -38,6 +38,11 @@ pub struct Theme {
     // Accent
     pub accent_primary: Color,
     pub accent_dim: Color,
+
+    // Platform accents
+    pub platform_gh: Color,
+    pub platform_rw: Color,
+    pub platform_vc: Color,
 }
 
 impl Theme {
@@ -70,6 +75,10 @@ impl Theme {
 
             accent_primary: Color::Rgb(129, 140, 248),
             accent_dim: Color::Rgb(67, 56, 202),
+
+            platform_gh: Color::Rgb(226, 232, 240),
+            platform_rw: Color::Rgb(167, 139, 250),
+            platform_vc: Color::Rgb(56, 189, 248),
         }
     }
 
@@ -102,6 +111,10 @@ impl Theme {
 
             accent_primary: Color::Rgb(79, 70, 229),
             accent_dim: Color::Rgb(199, 210, 254),
+
+            platform_gh: Color::Rgb(51, 65, 85),
+            platform_rw: Color::Rgb(109, 40, 217),
+            platform_vc: Color::Rgb(2, 132, 199),
         }
     }
 
@@ -134,6 +147,10 @@ impl Theme {
 
             accent_primary: Color::Magenta,
             accent_dim: Color::DarkGray,
+
+            platform_gh: Color::White,
+            platform_rw: Color::Magenta,
+            platform_vc: Color::Cyan,
         }
     }
 
@@ -241,6 +258,17 @@ impl Theme {
     }
     pub fn keybind_desc(&self) -> Style {
         Style::new().fg(self.fg_muted)
+    }
+
+    // Platform accent styles
+    pub fn gh_accent(&self) -> Style {
+        Style::new().fg(self.platform_gh).bold()
+    }
+    pub fn rw_accent(&self) -> Style {
+        Style::new().fg(self.platform_rw).bold()
+    }
+    pub fn vc_accent(&self) -> Style {
+        Style::new().fg(self.platform_vc).bold()
     }
 }
 

@@ -1,9 +1,8 @@
-//! Header widget — 3-line brand mark + tab bar + active-tab underline.
+//! Header widget — 2-line brand mark + tab bar + active-tab underline.
 //!
 //! Layout (§4.17, §5.2):
 //!   Line 1: `P U L S O S   Unified │ Platform │ Health    Last sync: Xs ago`
 //!   Line 2:  underline `════` only under the active tab (accent.primary)
-//!   Line 3:  (reserved / blank)
 
 use chrono::Utc;
 use pulsos_core::auth::PlatformKind;
@@ -19,12 +18,11 @@ use ratatui::{
 use crate::tui::app::{App, Tab};
 use crate::tui::theme::Theme;
 
-/// Draw the 3-row header.
+/// Draw the 2-row header.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let rows = Layout::vertical([
         Constraint::Length(1), // line 1: brand + tabs + sync info
         Constraint::Length(1), // line 2: active-tab underline
-        Constraint::Length(1), // line 3: blank / reserved
     ])
     .split(area);
 
@@ -66,7 +64,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         )),
         rows[1],
     );
-    // line 3 left blank
 }
 
 /// Build tab spans: `Unified │ Platform │ Health` with active tab highlighted.
@@ -105,7 +102,13 @@ fn build_platform_badges<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
             .map(|report| report.state)
             .unwrap_or(PlatformHealthState::NoToken);
 
-        let style = match state {
+        let label_style = match platform {
+            PlatformKind::GitHub => theme.gh_accent(),
+            PlatformKind::Railway => theme.rw_accent(),
+            PlatformKind::Vercel => theme.vc_accent(),
+        };
+
+        let state_style = match state {
             PlatformHealthState::Ready => theme.success(),
             PlatformHealthState::InvalidToken => theme.failure(),
             PlatformHealthState::ConnectivityError => theme.warning(),
@@ -113,10 +116,8 @@ fn build_platform_badges<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
             PlatformHealthState::NoToken => theme.neutral(),
         };
 
-        spans.push(Span::styled(
-            format!("{}{}", short_platform(platform), state.icon()),
-            style,
-        ));
+        spans.push(Span::styled(short_platform(platform).to_string(), label_style));
+        spans.push(Span::styled(state.icon(), state_style));
     }
 
     spans
