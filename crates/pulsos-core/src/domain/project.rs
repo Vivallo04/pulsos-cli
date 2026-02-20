@@ -86,6 +86,8 @@ impl std::fmt::Display for Confidence {
 /// for the same commit/deployment.
 #[derive(Debug, Clone, Serialize)]
 pub struct CorrelatedEvent {
+    /// The project name from the correlation config, if matched.
+    pub project_name: Option<String>,
     pub commit_sha: Option<String>,
     pub github: Option<DeploymentEvent>,
     pub railway: Option<DeploymentEvent>,

@@ -35,15 +35,29 @@ pub struct DiscoveryPayload {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct OnboardingState {
     pub platform_cursor: usize,
-    pub platform_selected: [bool; 3],
+    pub platform_selected: Vec<bool>,
     pub resource_cursor: usize,
     pub github: Vec<SelectableResource>,
     pub railway: Vec<SelectableResource>,
     pub vercel: Vec<SelectableVercelResource>,
     pub correlation_preview: Vec<String>,
+}
+
+impl Default for OnboardingState {
+    fn default() -> Self {
+        Self {
+            platform_cursor: 0,
+            platform_selected: vec![false; PlatformKind::ALL.len()],
+            resource_cursor: 0,
+            github: vec![],
+            railway: vec![],
+            vercel: vec![],
+            correlation_preview: vec![],
+        }
+    }
 }
 
 impl OnboardingState {
@@ -55,7 +69,7 @@ impl OnboardingState {
         PlatformKind::ALL
             .iter()
             .enumerate()
-            .filter_map(|(i, p)| self.platform_selected[i].then_some(*p))
+            .filter_map(|(i, p)| self.platform_selected.get(i).copied().unwrap_or(false).then_some(*p))
             .collect()
     }
 

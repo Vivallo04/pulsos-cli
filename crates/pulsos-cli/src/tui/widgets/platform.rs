@@ -59,15 +59,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     let rows: Vec<Row> = filtered_events
         .iter()
-        .enumerate()
-        .map(|(i, event)| {
-            let is_selected = i == app.selected_row;
-            let row_style = if is_selected {
-                theme.selected_row()
-            } else {
-                ratatui::style::Style::default()
-            };
-
+        .map(|event| {
             // Status badge
             let (sym, label, style) = status_spans(&event.status, theme);
             let status_cell = Cell::from(Line::from(vec![
@@ -101,7 +93,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 Cell::from(Span::styled(age, theme.t8())),
                 Cell::from(Span::styled(duration, theme.t8())),
             ])
-            .style(row_style)
         })
         .collect();
 
@@ -174,6 +165,7 @@ fn platform_detail(event: &DeploymentEvent) -> String {
 mod tests {
     use super::*;
     use crate::tui::app::{App, DataSnapshot};
+    use crate::tui::log_buffer::LogRingBuffer;
     use chrono::Utc;
     use pulsos_core::config::types::TuiConfig;
     use pulsos_core::domain::deployment::{
@@ -250,7 +242,7 @@ mod tests {
 
         let mut data = DataSnapshot::default();
         data.events = sample_events();
-        let app = App::new(data, TuiConfig::default());
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
 
         terminal

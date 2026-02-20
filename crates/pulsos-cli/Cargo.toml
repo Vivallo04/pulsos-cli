@@ -2,6 +2,14 @@
 name = "pulsos-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform deployment monitoring CLI"
+readme = "../../README.md"
+homepage = "https://github.com/Vivallo04/pulsos-cli"
+keywords = ["deployment", "monitoring", "devops", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "pulsos"

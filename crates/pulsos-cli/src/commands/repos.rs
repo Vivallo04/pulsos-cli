@@ -496,6 +496,7 @@ fn remove_command(resource: &str, config_path: Option<&Path>) -> Result<()> {
         c.github_repo.is_some() || c.railway_project.is_some() || c.vercel_project.is_some()
     });
 
+    populate_platform_sections(&mut config);
     save_config(&config, config_path)?;
     println!("Removed {platform}:{id} from tracking.");
     Ok(())

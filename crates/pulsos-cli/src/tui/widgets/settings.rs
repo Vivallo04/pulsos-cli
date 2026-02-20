@@ -16,6 +16,7 @@ mod copy {
     pub const PROVIDER: &str = "Provider";
     pub const TOKEN_SOURCE: &str = "Token Source";
     pub const REASON: &str = "Reason";
+    pub const NEXT_ACTION: &str = "Next Action";
     pub const ACTIONS: &str = "Actions";
     pub const RESULT: &str = "Result";
     pub const PROVIDER_STATS: &str = "Provider Stats";
@@ -45,10 +46,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         return;
     }
 
-    let chunks = Layout::horizontal([Constraint::Length(90), Constraint::Min(30)])
+    let chunks = Layout::horizontal([Constraint::Length(28), Constraint::Min(40)])
         .split(area);
 
-    let header_cells = ["Platform", "State", "Reason", "Next Action"]
+    let header_cells = ["Platform", "State"]
         .iter()
         .map(|h| Cell::from(*h).style(theme.t4()));
     let header = Row::new(header_cells);
@@ -75,8 +76,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     format!("{} {}", report.state.icon(), report.state.label()),
                     state_style(report.state, theme),
                 )),
-                Cell::from(Span::styled(truncate(&report.reason, 34), theme.t7())),
-                Cell::from(Span::styled(truncate(&report.next_action, 22), theme.t8())),
             ])
             .style(row_style)
         })
@@ -86,9 +85,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         rows,
         [
             Constraint::Length(10),
-            Constraint::Length(20),
-            Constraint::Length(36),
-            Constraint::Min(20),
+            Constraint::Min(14),
         ],
     )
     .header(header)
@@ -148,6 +145,8 @@ fn render_detail(report: &PlatformHealthReport, app: &App) -> String {
         format!("  {token_source}"),
         copy::REASON.to_string(),
         format!("  {}", report.reason),
+        copy::NEXT_ACTION.to_string(),
+        format!("  {}", report.next_action),
         String::new(),
         copy::ACTIONS.to_string(),
         format!("  {}", copy::ACTION_TOKEN),
@@ -187,7 +186,7 @@ fn render_detail(report: &PlatformHealthReport, app: &App) -> String {
                 } else {
                     " "
                 };
-                let checked = if app.onboarding.platform_selected[idx] {
+                let checked = if app.onboarding.platform_selected.get(idx).copied().unwrap_or(false) {
                     "x"
                 } else {
                     " "
@@ -293,7 +292,7 @@ fn push_resource_line(
         " "
     };
     let checked = if selected { "x" } else { " " };
-    lines.push(format!(" {pointer} [{checked}] {prefix} {}", truncate(display, 46)));
+    lines.push(format!(" {pointer} [{checked}] {prefix} {}", truncate(display, 80)));
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -310,6 +309,7 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::tui::app::{App, DataSnapshot};
+    use crate::tui::log_buffer::LogRingBuffer;
     use chrono::Utc;
     use pulsos_core::auth::PlatformKind;
     use pulsos_core::config::types::TuiConfig;
@@ -337,7 +337,7 @@ mod tests {
         let mut data = DataSnapshot::default();
         data.platform_health = vec![health_report(Some("keyring"))];
 
-        let app = App::new(data, TuiConfig::default());
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
 
         terminal
@@ -361,13 +361,14 @@ mod tests {
         let report = health_report(Some("keyring"));
         let mut data = DataSnapshot::default();
         data.platform_health = vec![report.clone()];
-        let app = App::new(data, TuiConfig::default());
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
 
         let detail = render_detail(&report, &app);
         for heading in [
             copy::PROVIDER,
             copy::TOKEN_SOURCE,
             copy::REASON,
+            copy::NEXT_ACTION,
             copy::ACTIONS,
             copy::RESULT,
             copy::PROVIDER_STATS,
@@ -384,7 +385,7 @@ mod tests {
         let report = health_report(Some("GITHUB_TOKEN"));
         let mut data = DataSnapshot::default();
         data.platform_health = vec![report.clone()];
-        let app = App::new(data, TuiConfig::default());
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
 
         let detail = render_detail(&report, &app);
         assert!(detail.contains(copy::ENV_WARNING));

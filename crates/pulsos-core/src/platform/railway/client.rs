@@ -136,19 +136,50 @@ impl RailwayClient {
         deployment: &RwDeployment,
         service_name: Option<&str>,
         environment_name: Option<&str>,
+        source_id: Option<&str>,
         is_from_cache: bool,
     ) -> DeploymentEvent {
+        // Extract commit info from meta if available
+        let (commit_sha, branch, meta_message, actor) = deployment
+            .meta
+            .as_ref()
+            .map(|m| {
+                (
+                    m.get("commitHash")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    m.get("branch")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    m.get("commitMessage")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    m.get("commitAuthor")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                )
+            })
+            .unwrap_or((None, None, None, None));
+
+        // Title: prefer commit message, fall back to service name
+        let title = meta_message.or_else(|| service_name.map(String::from));
+
+        // Duration from createdAt -> updatedAt
+        let duration_secs = deployment.updated_at.map(|updated| {
+            (updated - deployment.created_at).num_seconds().max(0) as u64
+        });
+
         DeploymentEvent {
             id: deployment.id.clone(),
             platform: Platform::Railway,
             status: DeploymentStatus::from(deployment.status),
-            commit_sha: None, // Railway doesn't expose commit SHAs
-            branch: None,
-            title: None,
-            actor: None,
+            commit_sha,
+            branch,
+            title,
+            actor,
             created_at: deployment.created_at,
-            updated_at: None,
-            duration_secs: None,
+            updated_at: deployment.updated_at,
+            duration_secs,
             url: deployment
                 .static_url
                 .as_ref()
@@ -156,6 +187,7 @@ impl RailwayClient {
             metadata: EventMetadata {
                 service_name: service_name.map(String::from),
                 environment_name: environment_name.map(String::from),
+                source_id: source_id.map(String::from),
                 ..Default::default()
             },
             is_from_cache,
@@ -217,7 +249,9 @@ query($input: DeploymentListInput!, $first: Int) {
         id
         status
         createdAt
+        updatedAt
         staticUrl
+        meta
       }
     }
   }
@@ -402,6 +436,7 @@ impl PlatformAdapter for RailwayClient {
                             d,
                             Some(&resource.display_name),
                             None,
+                            Some(&resource.platform_id),
                             false,
                         ));
                     }
@@ -420,6 +455,7 @@ impl PlatformAdapter for RailwayClient {
                                 d,
                                 Some(&resource.display_name),
                                 None,
+                                Some(&resource.platform_id),
                                 true,
                             ));
                         }

@@ -9,6 +9,7 @@ use pulsos_core::domain::project::CorrelatedEvent;
 use pulsos_core::health::PlatformHealthReport;
 
 use super::actions::{ActionRequest, ActionResult};
+use super::log_buffer::LogRingBuffer;
 use super::settings_flow::{OnboardingState, SettingsFlowState};
 
 /// The top-level tabs.
@@ -18,10 +19,17 @@ pub enum Tab {
     Platform,
     Health,
     Settings,
+    Logs,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Unified, Tab::Platform, Tab::Health, Tab::Settings];
+    pub const ALL: [Tab; 5] = [
+        Tab::Unified,
+        Tab::Platform,
+        Tab::Health,
+        Tab::Settings,
+        Tab::Logs,
+    ];
 
     pub fn index(self) -> usize {
         match self {
@@ -29,15 +37,17 @@ impl Tab {
             Tab::Platform => 1,
             Tab::Health => 2,
             Tab::Settings => 3,
+            Tab::Logs => 4,
         }
     }
 
     pub fn from_index(i: usize) -> Self {
-        match i % 4 {
+        match i % 5 {
             0 => Tab::Unified,
             1 => Tab::Platform,
             2 => Tab::Health,
             3 => Tab::Settings,
+            4 => Tab::Logs,
             _ => unreachable!(),
         }
     }
@@ -49,6 +59,7 @@ impl Tab {
             Tab::Platform => "Platform Details",
             Tab::Health => "Health & Metrics",
             Tab::Settings => "Settings",
+            Tab::Logs => "Logs",
         }
     }
 
@@ -58,6 +69,7 @@ impl Tab {
             Tab::Platform => "Platform",
             Tab::Health => "Health",
             Tab::Settings => "Settings",
+            Tab::Logs => "Logs",
         }
     }
 
@@ -168,10 +180,12 @@ pub struct App {
     pub pending_action: Option<ActionRequest>,
     /// In-TUI onboarding draft state.
     pub onboarding: OnboardingState,
+    /// Captured tracing log entries for the Logs tab.
+    pub log_buffer: LogRingBuffer,
 }
 
 impl App {
-    pub fn new(data: DataSnapshot, tui_config: TuiConfig) -> Self {
+    pub fn new(data: DataSnapshot, tui_config: TuiConfig, log_buffer: LogRingBuffer) -> Self {
         let default_tab = match tui_config.default_tab.as_str() {
             "by_platform" | "platform" => Tab::Platform,
             "health" => Tab::Health,
@@ -198,6 +212,7 @@ impl App {
             settings_action_in_flight: false,
             pending_action: None,
             onboarding: OnboardingState::default(),
+            log_buffer,
         }
     }
 
@@ -208,6 +223,7 @@ impl App {
             Tab::Platform => self.data.events.len(),
             Tab::Health => self.data.health_scores.len(),
             Tab::Settings => self.data.platform_health.len(),
+            Tab::Logs => self.log_buffer.len(),
         }
     }
 
@@ -371,7 +387,8 @@ mod tests {
         assert_eq!(Tab::from_index(1), Tab::Platform);
         assert_eq!(Tab::from_index(2), Tab::Health);
         assert_eq!(Tab::from_index(3), Tab::Settings);
-        assert_eq!(Tab::from_index(4), Tab::Unified);
+        assert_eq!(Tab::from_index(4), Tab::Logs);
+        assert_eq!(Tab::from_index(5), Tab::Unified);
     }
 
     #[test]
@@ -380,12 +397,14 @@ mod tests {
         assert_eq!(tab.next(), Tab::Platform);
         assert_eq!(tab.next().next(), Tab::Health);
         assert_eq!(tab.next().next().next(), Tab::Settings);
-        assert_eq!(tab.next().next().next().next(), Tab::Unified);
+        assert_eq!(tab.next().next().next().next(), Tab::Logs);
+        assert_eq!(tab.next().next().next().next().next(), Tab::Unified);
 
-        assert_eq!(tab.prev(), Tab::Settings);
-        assert_eq!(tab.prev().prev(), Tab::Health);
-        assert_eq!(tab.prev().prev().prev(), Tab::Platform);
-        assert_eq!(tab.prev().prev().prev().prev(), Tab::Unified);
+        assert_eq!(tab.prev(), Tab::Logs);
+        assert_eq!(tab.prev().prev(), Tab::Settings);
+        assert_eq!(tab.prev().prev().prev(), Tab::Health);
+        assert_eq!(tab.prev().prev().prev().prev(), Tab::Platform);
+        assert_eq!(tab.prev().prev().prev().prev().prev(), Tab::Unified);
     }
 
     #[test]
@@ -394,6 +413,7 @@ mod tests {
         assert_eq!(Tab::Platform.label(), "Platform Details");
         assert_eq!(Tab::Health.label(), "Health & Metrics");
         assert_eq!(Tab::Settings.label(), "Settings");
+        assert_eq!(Tab::Logs.label(), "Logs");
     }
 
     #[test]
@@ -402,6 +422,7 @@ mod tests {
         assert_eq!(Tab::Platform.short_label(), "Platform");
         assert_eq!(Tab::Health.short_label(), "Health");
         assert_eq!(Tab::Settings.short_label(), "Settings");
+        assert_eq!(Tab::Logs.short_label(), "Logs");
     }
 
     #[test]
@@ -409,29 +430,29 @@ mod tests {
         let data = DataSnapshot::default();
 
         let config = TuiConfig::default();
-        let app = App::new(data.clone(), config);
+        let app = App::new(data.clone(), config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Unified);
 
         let mut config = TuiConfig::default();
         config.default_tab = "platform".into();
-        let app = App::new(data.clone(), config);
+        let app = App::new(data.clone(), config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Platform);
 
         let mut config = TuiConfig::default();
         config.default_tab = "health".into();
-        let app = App::new(data.clone(), config);
+        let app = App::new(data.clone(), config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Health);
 
         let mut config = TuiConfig::default();
         config.default_tab = "settings".into();
-        let app = App::new(data, config);
+        let app = App::new(data, config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Settings);
     }
 
     #[test]
     fn app_clamp_selection() {
         let data = DataSnapshot::default();
-        let mut app = App::new(data, TuiConfig::default());
+        let mut app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
 
         app.selected_row = 10;
         app.clamp_selection();

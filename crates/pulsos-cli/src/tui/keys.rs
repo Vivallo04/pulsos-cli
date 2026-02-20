@@ -60,6 +60,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             app.selected_row = 0;
             app.clamp_selection();
         }
+        KeyCode::Char('5') => {
+            app.active_tab = Tab::Logs;
+            app.selected_row = 0;
+            app.clamp_selection();
+        }
 
         // Tab cycling
         KeyCode::Tab => {
@@ -304,6 +309,7 @@ mod tests {
     use super::*;
     use crate::tui::actions::ActionRequest;
     use crate::tui::app::{DataSnapshot, InputMode, Tab};
+    use crate::tui::log_buffer::LogRingBuffer;
     use crate::tui::settings_flow::SettingsFlowState;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use chrono::Utc;
@@ -337,7 +343,7 @@ mod tests {
             ("proj-b".into(), 50),
             ("proj-c".into(), 10),
         ];
-        App::new(data, TuiConfig::default())
+        App::new(data, TuiConfig::default(), LogRingBuffer::new())
     }
 
     fn settings_app() -> App {
@@ -351,7 +357,7 @@ mod tests {
             last_checked_at: Utc::now(),
             details: PlatformHealthDetails::None,
         }];
-        let mut app = App::new(data, TuiConfig::default());
+        let mut app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         app.active_tab = Tab::Settings;
         app
     }
@@ -367,7 +373,7 @@ mod tests {
             last_checked_at: Utc::now(),
             details: PlatformHealthDetails::None,
         }];
-        let mut app = App::new(data, TuiConfig::default());
+        let mut app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         app.active_tab = Tab::Settings;
         app
     }
@@ -465,6 +471,8 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.active_tab, Tab::Settings);
         handle_key(&mut app, make_key(KeyCode::Tab));
+        assert_eq!(app.active_tab, Tab::Logs);
+        handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.active_tab, Tab::Unified);
     }
 
@@ -473,11 +481,21 @@ mod tests {
         let mut app = test_app();
         assert_eq!(app.active_tab, Tab::Unified);
         handle_key(&mut app, make_key(KeyCode::BackTab));
+        assert_eq!(app.active_tab, Tab::Logs);
+        handle_key(&mut app, make_key(KeyCode::BackTab));
         assert_eq!(app.active_tab, Tab::Settings);
         handle_key(&mut app, make_key(KeyCode::BackTab));
         assert_eq!(app.active_tab, Tab::Health);
         handle_key(&mut app, make_key(KeyCode::BackTab));
         assert_eq!(app.active_tab, Tab::Platform);
+    }
+
+    #[test]
+    fn switch_to_logs_with_key_5() {
+        let mut app = test_app();
+        handle_key(&mut app, make_key(KeyCode::Char('5')));
+        assert_eq!(app.active_tab, Tab::Logs);
+        assert_eq!(app.selected_row, 0);
     }
 
     #[test]

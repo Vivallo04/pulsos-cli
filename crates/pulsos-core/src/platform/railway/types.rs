@@ -127,7 +127,11 @@ pub struct RwDeployment {
     pub id: String,
     pub status: RwDeploymentStatus,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
     pub static_url: Option<String>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
 }
 
 /// Railway deployment status values.

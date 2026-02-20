@@ -192,16 +192,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_env_var_takes_priority_over_keyring() {
-        // Set env var
-        unsafe { std::env::set_var("PULSOS_TEST_GH_TOKEN", "env_token") };
-
+    fn keyring_wins_when_env_detection_disabled() {
         let store = Arc::new(InMemoryStore::new());
         store.set(&PlatformKind::GitHub, "keyring_token").unwrap();
 
-        // Create a resolver that checks the env var we set
-        // (We can't easily test with GITHUB_TOKEN as it may be set in the real env)
-        // Instead, test the priority by ensuring keyring works when env is disabled
         let resolver = TokenResolver::new(
             store,
             TokenDetectionConfig {
@@ -217,8 +211,41 @@ mod tests {
             .expect("should resolve");
         assert_eq!(token.expose_secret(), "keyring_token");
         assert_eq!(source, TokenSource::Keyring);
+    }
 
-        unsafe { std::env::remove_var("PULSOS_TEST_GH_TOKEN") };
+    #[test]
+    fn env_var_takes_priority_over_keyring() {
+        let var_name = PlatformKind::GitHub.env_var_names()[0];
+        let original = std::env::var(var_name).ok();
+        unsafe { std::env::set_var(var_name, "env_priority_token") };
+
+        let store = Arc::new(InMemoryStore::new());
+        store.set(&PlatformKind::GitHub, "keyring_token").unwrap();
+
+        let resolver = TokenResolver::new(
+            store,
+            TokenDetectionConfig {
+                detect_env_vars: true,
+                detect_gh_cli: false,
+                detect_railway_cli: false,
+                detect_vercel_cli: false,
+            },
+        );
+
+        let result = resolver.resolve_with_source(&PlatformKind::GitHub);
+
+        // Restore before any assertions that might panic
+        match original {
+            Some(v) => unsafe { std::env::set_var(var_name, v) },
+            None => unsafe { std::env::remove_var(var_name) },
+        }
+
+        let (token, source) = result.expect("should resolve");
+        assert_eq!(token.expose_secret(), "env_priority_token");
+        assert!(
+            matches!(source, TokenSource::EnvVar(_)),
+            "expected EnvVar source, got {source:?}"
+        );
     }
 
     #[test]

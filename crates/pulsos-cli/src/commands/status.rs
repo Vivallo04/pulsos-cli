@@ -85,6 +85,8 @@ pub async fn execute(
     format: OutputFormat,
     _no_color: bool,
     config_path: Option<&Path>,
+    log_buffer: crate::tui::log_buffer::LogRingBuffer,
+    tui_active: crate::tui::log_buffer::TuiActiveFlag,
 ) -> Result<()> {
     let stdout_is_tty = std::io::stdout().is_terminal();
 
@@ -143,7 +145,13 @@ pub async fn execute(
 
     let run_mode = resolve_run_mode(&args, format, stdout_is_tty)?;
     if run_mode == RunMode::Live {
-        return crate::tui::run_tui(config, config_path.map(|p| p.to_path_buf())).await;
+        return crate::tui::run_tui(
+            config,
+            config_path.map(|p| p.to_path_buf()),
+            log_buffer,
+            tui_active,
+        )
+        .await;
     }
 
     let cache = Arc::new(CacheStore::open_or_temporary());

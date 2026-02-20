@@ -200,7 +200,7 @@ impl Theme {
         Style::new().fg(self.fg_muted)
     }
     pub fn t9(&self) -> Style {
-        Style::new().fg(Color::Rgb(68, 68, 68))
+        Style::new().fg(self.border_default)
     }
 
     // Semantic status styles

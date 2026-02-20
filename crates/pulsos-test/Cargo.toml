@@ -2,6 +2,7 @@
 name = "pulsos-test"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 pulsos-core.workspace = true

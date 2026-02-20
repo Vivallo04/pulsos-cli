@@ -28,7 +28,7 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     let chunks = Layout::vertical([
         Constraint::Length(3), // Header: brand + tabs + underline
         Constraint::Min(5),    // Main content
-        Constraint::Length(1), // Footer: key hints
+        Constraint::Length(2), // Footer: key hints + log/warning line
     ])
     .split(area);
 
@@ -53,6 +53,7 @@ fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Tab::Platform => super::widgets::platform::draw(frame, area, app, theme),
         Tab::Health => super::widgets::health::draw(frame, area, app, theme),
         Tab::Settings => super::widgets::settings::draw(frame, area, app, theme),
+        Tab::Logs => super::widgets::logs::draw(frame, area, app, theme),
     }
 }
 

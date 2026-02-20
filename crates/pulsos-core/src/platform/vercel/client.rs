@@ -111,7 +111,11 @@ impl VercelClient {
         Ok(body.deployments)
     }
 
-    fn deployment_to_event(deployment: &VcDeployment, is_from_cache: bool) -> DeploymentEvent {
+    fn deployment_to_event(
+        deployment: &VcDeployment,
+        source_id: Option<&str>,
+        is_from_cache: bool,
+    ) -> DeploymentEvent {
         let status = deployment
             .ready_state
             .or(deployment.state)
@@ -158,6 +162,7 @@ impl VercelClient {
             metadata: EventMetadata {
                 preview_url: deployment.url.clone(),
                 deploy_target: deployment.target.clone(),
+                source_id: source_id.map(String::from),
                 ..Default::default()
             },
             is_from_cache,
@@ -234,7 +239,11 @@ impl PlatformAdapter for VercelClient {
                     let _ = self.cache.set(&cache_key, &deployments, 30, None);
 
                     for d in &deployments {
-                        all_events.push(Self::deployment_to_event(d, false));
+                        all_events.push(Self::deployment_to_event(
+                            d,
+                            Some(&resource.platform_id),
+                            false,
+                        ));
                     }
                 }
                 Err(e) => {
@@ -247,7 +256,11 @@ impl PlatformAdapter for VercelClient {
                         crate::cache::keys::vercel_deployments_key(&resource.platform_id);
                     if let Ok(Some(cached)) = self.cache.get::<Vec<VcDeployment>>(&cache_key) {
                         for d in &cached.data {
-                            all_events.push(Self::deployment_to_event(d, true));
+                            all_events.push(Self::deployment_to_event(
+                                d,
+                                Some(&resource.platform_id),
+                                true,
+                            ));
                         }
                     }
                 }

@@ -326,7 +326,7 @@ github.com:
 
     #[test]
     fn detect_gh_token_missing_file() {
-        let path = PathBuf::from("/tmp/nonexistent_gh_hosts.yml");
+        let path = std::env::temp_dir().join("nonexistent_gh_hosts_pulsos_test.yml");
         assert_eq!(detect_gh_token_from_path(&path), None);
     }
 
@@ -408,7 +408,7 @@ github.com:
 
     #[test]
     fn detect_vercel_token_missing_file() {
-        let path = PathBuf::from("/tmp/nonexistent_vercel_auth.json");
+        let path = std::env::temp_dir().join("nonexistent_vercel_auth_pulsos_test.json");
         assert_eq!(detect_vercel_token_from_path(&path), None);
     }
 }

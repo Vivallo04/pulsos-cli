@@ -141,29 +141,31 @@ impl FileCredentialStore {
         let content = toml::to_string_pretty(creds)
             .map_err(|e| PulsosError::Keyring(format!("Failed to serialize credentials: {e}")))?;
 
-        std::fs::write(&self.path, content)
-            .map_err(|e| PulsosError::Keyring(format!("Failed to write credentials file: {e}")))?;
-
-        // Restrict permissions to owner-only on Unix.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600)).map_err(
-                |e| {
-                    PulsosError::Keyring(format!("Failed to set credentials file permissions: {e}"))
-                },
-            )?;
+            use std::io::Write as _;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&self.path)
+                .map_err(|e| {
+                    PulsosError::Keyring(format!("Failed to open credentials file: {e}"))
+                })?;
+            file.write_all(content.as_bytes()).map_err(|e| {
+                PulsosError::Keyring(format!("Failed to write credentials file: {e}"))
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&self.path, content).map_err(|e| {
+                PulsosError::Keyring(format!("Failed to write credentials file: {e}"))
+            })?;
         }
 
         Ok(())
-    }
-}
-
-impl Default for FileCredentialStore {
-    fn default() -> Self {
-        Self {
-            path: Self::default_path().unwrap_or_else(|_| PathBuf::from("credentials.toml")),
-        }
     }
 }
 
@@ -224,7 +226,14 @@ impl CredentialStore for FallbackStore {
         // Prefer keyring; fall back to file when keyring has no entry or errors.
         match self.keyring.get(platform) {
             Ok(Some(token)) => return Ok(Some(token)),
-            _ => {}
+            Ok(None) => {}
+            Err(e) => {
+                tracing::debug!(
+                    platform = platform.display_name(),
+                    error = %e,
+                    "Keyring read failed, falling back to file"
+                );
+            }
         }
         self.file.get(platform)
     }

@@ -176,6 +176,7 @@ fn health_status_label(score: u8) -> &'static str {
 mod tests {
     use super::*;
     use crate::tui::app::{App, DataSnapshot};
+    use crate::tui::log_buffer::LogRingBuffer;
     use crate::tui::theme::Theme;
     use pulsos_core::config::types::TuiConfig;
     use ratatui::backend::TestBackend;
@@ -194,7 +195,7 @@ mod tests {
         ];
         let mut config = TuiConfig::default();
         config.show_sparklines = true;
-        App::new(data, config)
+        App::new(data, config, LogRingBuffer::new())
     }
 
     #[test]
@@ -223,7 +224,7 @@ mod tests {
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let app = App::new(DataSnapshot::default(), TuiConfig::default());
+        let app = App::new(DataSnapshot::default(), TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
 
         terminal

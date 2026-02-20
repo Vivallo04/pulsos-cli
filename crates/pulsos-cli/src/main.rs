@@ -60,22 +60,34 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
-    // Initialize tracing
+    // Initialize tracing with dual writer (ring buffer + conditional stderr).
     let filter = if cli.verbose {
         tracing_subscriber::EnvFilter::new("pulsos=debug")
     } else {
         tracing_subscriber::EnvFilter::new("pulsos=warn")
     };
+    let log_buffer = tui::log_buffer::LogRingBuffer::new();
+    let tui_active = tui::log_buffer::TuiActiveFlag::new();
+    let writer = tui::log_buffer::DualWriterFactory::new(log_buffer.clone(), tui_active.clone());
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_writer(writer)
         .init();
 
     let config_path = cli.config.as_deref();
 
     let result = match cli.command {
         Some(Commands::Status(args)) => {
-            commands::status::execute(args, cli.format, cli.no_color, config_path).await
+            commands::status::execute(
+                args,
+                cli.format,
+                cli.no_color,
+                config_path,
+                log_buffer.clone(),
+                tui_active.clone(),
+            )
+            .await
         }
         Some(Commands::Auth(args)) => commands::auth::execute(args, config_path).await,
         Some(Commands::Repos(args)) => commands::repos::execute(args, config_path).await,
@@ -97,7 +109,7 @@ async fn main() {
                 watch: false,
                 once: false,
             };
-            commands::status::execute(args, cli.format, cli.no_color, config_path).await
+            commands::status::execute(args, cli.format, cli.no_color, config_path, log_buffer, tui_active).await
         }
     };
 

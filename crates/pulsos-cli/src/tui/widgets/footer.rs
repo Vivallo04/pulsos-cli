@@ -24,34 +24,52 @@ mod copy {
     pub const SETTINGS_TOKEN_INPUT: &str = "[Enter] validate+save  [Esc] cancel";
 }
 
-/// Draw the footer bar.
+/// Draw the footer bar (2 rows: keybindings + sync status on top, log/warning below).
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let chunks = Layout::horizontal([Constraint::Min(36), Constraint::Length(44)]).split(area);
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
-    // Left: keybinding help
+    // ── Row 0: keybinding help (left) + sync status (right) ──
+    let top = Layout::horizontal([Constraint::Min(36), Constraint::Length(20)]).split(rows[0]);
+
     let help_line = match app.input_mode {
         InputMode::Normal => build_normal_help(app, theme),
         InputMode::Search => build_search_help(app, theme),
     };
-    frame.render_widget(Paragraph::new(help_line), chunks[0]);
+    frame.render_widget(Paragraph::new(help_line), top[0]);
 
-    // Right: sync state + warning count + latest warning summary
     let status = format_sync_status(app);
-    let mut right_spans = vec![Span::styled(status, theme.keybind_desc())];
-
-    let warning_count = app.data.warnings.len();
-    if warning_count > 0 {
-        right_spans.push(Span::raw("  "));
-        right_spans.push(Span::styled(format!("⚠ {warning_count}"), theme.warning()));
-        if let Some(last) = app.data.warnings.last() {
-            right_spans.push(Span::raw("  "));
-            right_spans.push(Span::styled(truncate(last, 22), theme.t8()));
-        }
-    }
-
     let right =
-        Paragraph::new(Line::from(right_spans)).alignment(ratatui::layout::Alignment::Right);
-    frame.render_widget(right, chunks[1]);
+        Paragraph::new(Line::from(Span::styled(status, theme.keybind_desc())))
+            .alignment(ratatui::layout::Alignment::Right);
+    frame.render_widget(right, top[1]);
+
+    // ── Row 1: warning or latest log entry ──
+    let max_msg = (rows[1].width as usize).saturating_sub(6); // room for "WRN "
+    let warning_count = app.data.warnings.len();
+    let bottom_spans: Vec<Span> = if warning_count > 0 {
+        let mut spans = vec![
+            Span::styled(format!("⚠ {warning_count}"), theme.warning()),
+        ];
+        if let Some(last) = app.data.warnings.last() {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(truncate(last, max_msg), theme.t8()));
+        }
+        spans
+    } else if let Some(entry) = app.log_buffer.latest() {
+        let abbrev = super::logs::level_abbrev(&entry.level);
+        vec![
+            Span::styled(
+                format!("{abbrev} {}", truncate(&entry.message, max_msg)),
+                theme.t8(),
+            ),
+        ]
+    } else {
+        vec![]
+    };
+
+    if !bottom_spans.is_empty() {
+        frame.render_widget(Paragraph::new(Line::from(bottom_spans)), rows[1]);
+    }
 }
 
 /// Normal-mode keybinding line: `[key] desc` pairs.
@@ -65,7 +83,7 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
 
     let entries = [
         ("[q]", "quit"),
-        ("[Tab]", "switch tab (1-4)"),
+        ("[Tab]", "switch tab (1-5)"),
         ("[↵]", "select"),
         ("[/]", "search"),
         ("[r]", "refresh"),
@@ -156,7 +174,7 @@ fn settings_help_text(flow: SettingsFlowState) -> &'static str {
 pub fn render_help_text(app: &App) -> String {
     match app.input_mode {
         InputMode::Normal if app.active_tab != Tab::Settings => {
-            "[q] quit  [Tab] switch tab (1-4)  [↵] select  [/] search  [r] refresh".to_string()
+            "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh".to_string()
         }
         InputMode::Normal => settings_help_text(app.settings_flow).to_string(),
         InputMode::Search => format!("[Esc] cancel  [↵] apply  Filter: {}█", app.search_query),
@@ -167,10 +185,11 @@ pub fn render_help_text(app: &App) -> String {
 mod tests {
     use super::*;
     use crate::tui::app::{DataSnapshot, InputMode};
+    use crate::tui::log_buffer::LogRingBuffer;
     use pulsos_core::config::types::TuiConfig;
 
     fn test_app() -> App {
-        App::new(DataSnapshot::default(), TuiConfig::default())
+        App::new(DataSnapshot::default(), TuiConfig::default(), LogRingBuffer::new())
     }
 
     #[test]

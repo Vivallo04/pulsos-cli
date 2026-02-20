@@ -201,7 +201,11 @@ pub async fn needs_wizard_prompt(config: &PulsosConfig) -> Result<bool> {
     let reports = check_all_platforms_health(config, &resolver, &cache).await;
 
     let needs_setup = reports.iter().any(|report| {
-        platform_is_enabled(config, report.platform) && report.state != PlatformHealthState::Ready
+        platform_is_enabled(config, report.platform)
+            && matches!(
+                report.state,
+                PlatformHealthState::NoToken | PlatformHealthState::InvalidToken
+            )
     });
 
     Ok(needs_setup)

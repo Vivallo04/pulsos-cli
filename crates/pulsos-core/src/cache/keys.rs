@@ -4,7 +4,7 @@
 //! Examples:
 //!   - `github:runs:myorg/my-saas`          — Last 5 workflow runs
 //!   - `github:jobs:myorg/my-saas:12345`    — Jobs for run 12345
-//!   - `railway:deployments:project-uuid`   — Last 5 deployments
+//!   - `railway:deployments:project-uuid:service-uuid:env-uuid` — Last 5 deployments
 //!   - `railway:instance:service-uuid:env-uuid` — Service instance
 //!   - `vercel:deployments:project-id`      — Last 5 deployments
 //!   - `vercel:projects:team-id`            — Project list for team

@@ -20,49 +20,36 @@ use heuristic::{find_closest_by_timestamp, TIMESTAMP_WINDOW_SECS};
 use sha_match::find_sha_matches;
 
 /// Check if a deployment event belongs to a given correlation config project.
+///
+/// Uses `source_id` metadata (set by platform clients during fetch) for
+/// deterministic matching. Falls back to legacy ID/title heuristics when
+/// `source_id` is absent (e.g. events from older cache entries).
 pub fn event_matches_project(event: &DeploymentEvent, config: &CorrelationConfig) -> bool {
     match event.platform {
-        Platform::GitHub => {
-            if let Some(ref repo) = config.github_repo {
+        Platform::GitHub => config.github_repo.as_ref().map_or(false, |repo| {
+            if let Some(ref sid) = event.metadata.source_id {
+                sid == repo
+            } else {
+                // Legacy fallback: repo-prefixed IDs from test helpers
                 event.id.starts_with(repo)
-            } else {
-                false
             }
-        }
-        Platform::Railway => {
-            if let Some(ref project_id) = config.railway_project {
-                // Match on project ID prefix in the event id
-                if event.id.contains(project_id) {
-                    return true;
-                }
-                // Match on service name from metadata against project name
-                if let Some(ref service) = event.metadata.service_name {
-                    if project_id.contains(service) {
-                        return true;
-                    }
-                }
-                false
+        }),
+        Platform::Railway => config.railway_project.as_ref().map_or(false, |project| {
+            if let Some(ref sid) = event.metadata.source_id {
+                sid == project || sid.starts_with(&format!("{project}:"))
             } else {
-                false
+                // Legacy fallback
+                event.id.contains(project)
             }
-        }
-        Platform::Vercel => {
-            if let Some(ref project_id) = config.vercel_project {
-                // Match on project ID in the event id
-                if event.id.contains(project_id) {
-                    return true;
-                }
-                // Match on project name in the title
-                if let Some(ref title) = event.title {
-                    if title.contains(project_id) {
-                        return true;
-                    }
-                }
-                false
+        }),
+        Platform::Vercel => config.vercel_project.as_ref().map_or(false, |project| {
+            if let Some(ref sid) = event.metadata.source_id {
+                sid == project
             } else {
-                false
+                // Legacy fallback
+                event.id.contains(project)
             }
-        }
+        }),
     }
 }
 
@@ -136,6 +123,7 @@ pub fn correlate_project_events(
             || vercel[*vi].is_from_cache;
 
         result.push(CorrelatedEvent {
+            project_name: None,
             commit_sha: github[*gi].commit_sha.clone(),
             github: Some(github[*gi].clone()),
             railway: railway_event,
@@ -176,6 +164,7 @@ pub fn correlate_project_events(
             gh_event.is_from_cache || railway_event.as_ref().map_or(false, |e| e.is_from_cache);
 
         result.push(CorrelatedEvent {
+            project_name: None,
             commit_sha: gh_event.commit_sha.clone(),
             github: Some((*gh_event).clone()),
             railway: railway_event,
@@ -216,6 +205,7 @@ pub fn correlate_project_events(
             vc_event.is_from_cache || railway_event.as_ref().map_or(false, |e| e.is_from_cache);
 
         result.push(CorrelatedEvent {
+            project_name: None,
             commit_sha: vc_event.commit_sha.clone(),
             github: None,
             railway: railway_event,
@@ -233,6 +223,7 @@ pub fn correlate_project_events(
         }
 
         result.push(CorrelatedEvent {
+            project_name: None,
             commit_sha: rw_event.commit_sha.clone(),
             github: None,
             railway: Some((*rw_event).clone()),
@@ -268,7 +259,10 @@ pub fn correlate_all(
             }
         }
 
-        let correlated = correlate_project_events(config, &project_events);
+        let mut correlated = correlate_project_events(config, &project_events);
+        for c in &mut correlated {
+            c.project_name = Some(config.name.clone());
+        }
         result.extend(correlated);
     }
 
@@ -285,6 +279,7 @@ pub fn correlate_all(
         };
 
         result.push(CorrelatedEvent {
+            project_name: None,
             commit_sha: event.commit_sha.clone(),
             github,
             railway,

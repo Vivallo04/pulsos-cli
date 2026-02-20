@@ -17,10 +17,19 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 pub fn setup() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    if let Err(e) = execute!(stdout, EnterAlternateScreen) {
+        let _ = disable_raw_mode();
+        return Err(e.into());
+    }
     let backend = CrosstermBackend::new(stdout);
-    let terminal = Terminal::new(backend)?;
-    Ok(terminal)
+    match Terminal::new(backend) {
+        Ok(terminal) => Ok(terminal),
+        Err(e) => {
+            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            let _ = disable_raw_mode();
+            Err(e.into())
+        }
+    }
 }
 
 /// Leave the alternate screen and disable raw mode.
@@ -35,9 +44,16 @@ pub fn teardown(terminal: &mut Tui) -> Result<()> {
 ///
 /// Without this, a panic inside the TUI loop would leave the terminal in raw
 /// mode with the alternate screen active, making the error message invisible.
-pub fn install_panic_hook() {
+///
+/// If a `TuiActiveFlag` is provided, the flag is cleared in the panic hook
+/// so that the panic message writes to stderr normally.
+pub fn install_panic_hook(tui_active: Option<super::log_buffer::TuiActiveFlag>) {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
+        // Re-enable stderr output before restoring terminal.
+        if let Some(ref flag) = tui_active {
+            flag.set_active(false);
+        }
         // Best-effort terminal restoration — ignore errors.
         let _ = disable_raw_mode();
         let _ = execute!(io::stderr(), LeaveAlternateScreen);

@@ -3,6 +3,7 @@
 pub mod footer;
 pub mod header;
 pub mod health;
+pub mod logs;
 pub mod platform;
 pub mod settings;
 pub mod unified;

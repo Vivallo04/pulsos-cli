@@ -187,7 +187,7 @@ pub fn screen_input(
         input = input.allow_empty(true);
     }
 
-    match input.interact_text() {
+    match input.interact() {
         Ok(value) => {
             render_result(
                 session,
@@ -295,6 +295,18 @@ pub fn screen_multiselect<S: Clone + ToString>(
     items: &[S],
     defaults: &[bool],
 ) -> Result<PromptResult<Vec<usize>>> {
+    debug_assert_eq!(
+        items.len(),
+        defaults.len(),
+        "screen_multiselect: items and defaults length mismatch"
+    );
+    if items.len() != defaults.len() {
+        anyhow::bail!(
+            "screen_multiselect: items ({}) and defaults ({}) lengths differ",
+            items.len(),
+            defaults.len()
+        );
+    }
     session.render_with_prompt(spec, prompt)?;
     match dialoguer::MultiSelect::new()
         .with_prompt(prompt)

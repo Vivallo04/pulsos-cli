@@ -137,7 +137,11 @@ fn check_system() -> Vec<CheckResult> {
     let shell = std::env::var("SHELL")
         .or_else(|_| std::env::var("COMSPEC"))
         .unwrap_or_else(|_| "unknown".to_string());
-    let shell_name = shell.rsplit('/').next().unwrap_or(&shell);
+    let shell_name = std::path::Path::new(&shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&shell)
+        .to_string();
     results.push(CheckResult::ok("Shell", shell_name.to_string()));
 
     // Terminal
@@ -547,10 +551,20 @@ fn check_cli_tools() -> Vec<CheckResult> {
 
 /// Try to get a CLI tool's version via `tool --version`, with a 2-second timeout.
 fn detect_cli_version(tool: &str) -> Option<String> {
-    let output = std::process::Command::new(tool)
-        .arg("--version")
-        .output()
-        .ok()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tool_owned = tool.to_string();
+    std::thread::spawn(move || {
+        let result = std::process::Command::new(&tool_owned)
+            .arg("--version")
+            .output()
+            .ok();
+        let _ = tx.send(result);
+    });
+
+    let output = match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+        Ok(Some(o)) => o,
+        _ => return None,
+    };
 
     if !output.status.success() {
         return None;

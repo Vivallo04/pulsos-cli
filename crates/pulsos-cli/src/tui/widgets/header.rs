@@ -132,7 +132,7 @@ fn short_platform(platform: &PlatformKind) -> &'static str {
 
 /// Build the underline string: spaces to align, then `═` under the active tab.
 fn build_underline(app: &App, brand_prefix: u16) -> String {
-    let tab_labels = ["Unified", "Platform", "Health", "Settings"];
+    let tab_labels = ["Unified", "Platform", "Health", "Settings", "Logs"];
     let active_idx = app.active_tab.index();
 
     // Offset = brand_prefix + widths of all preceding tabs + " │ " separators (3 chars each)
@@ -198,7 +198,7 @@ pub fn draw_to_buf(area: Rect, app: &App, _theme: &Theme) -> ratatui::buffer::Bu
 
     // Row 1: underline under active tab (if area is tall enough)
     if area.height >= 2 {
-        let tab_labels = ["Unified", "Platform", "Health", "Settings"];
+        let tab_labels = ["Unified", "Platform", "Health", "Settings", "Logs"];
         let active_idx = app.active_tab.index();
         let mut offset = 0usize;
         for label in tab_labels.iter().take(active_idx) {
@@ -218,11 +218,12 @@ pub fn draw_to_buf(area: Rect, app: &App, _theme: &Theme) -> ratatui::buffer::Bu
 mod tests {
     use super::*;
     use crate::tui::app::{DataSnapshot, Tab};
+    use crate::tui::log_buffer::LogRingBuffer;
     use chrono::Duration;
     use pulsos_core::config::types::TuiConfig;
 
     fn test_app() -> App {
-        App::new(DataSnapshot::default(), TuiConfig::default())
+        App::new(DataSnapshot::default(), TuiConfig::default(), LogRingBuffer::new())
     }
 
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
@@ -246,6 +247,7 @@ mod tests {
         assert!(text.contains("Platform"), "Should contain Platform tab");
         assert!(text.contains("Health"), "Should contain Health tab");
         assert!(text.contains("Settings"), "Should contain Settings tab");
+        assert!(text.contains("Logs"), "Should contain Logs tab");
     }
 
     #[test]

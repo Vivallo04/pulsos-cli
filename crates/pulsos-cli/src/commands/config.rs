@@ -31,7 +31,13 @@ pub async fn execute(args: ConfigArgs, config_path: Option<&Path>) -> Result<()>
 }
 
 fn show_config(config_path: Option<&Path>) -> Result<()> {
-    let config = load_config(config_path).unwrap_or_default();
+    let config = match load_config(config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: failed to load config ({e}); showing defaults.");
+            pulsos_core::config::types::PulsosConfig::default()
+        }
+    };
     let toml = toml::to_string_pretty(&config)
         .map_err(|e| anyhow::anyhow!("Failed to serialize config: {e}"))?;
     print!("{toml}");

@@ -80,7 +80,7 @@ pub(crate) fn format_duration(secs: u64) -> String {
 
 fn health_color_ansi(score: u8, colored: bool) -> (&'static str, &'static str) {
     if !colored {
-        return ("", "\x1b[0m");
+        return ("", "");
     }
     if score >= 90 {
         ("\x1b[38;2;52;211;153m", "\x1b[0m") // status.success
@@ -147,11 +147,11 @@ pub fn render_correlated(events: &[CorrelatedEvent]) {
     println!("{dim}{}{dim_reset}", "─".repeat(total));
 
     for c in events {
-        // Project name: prefer Vercel/Railway title, fall back to SHA prefix
+        // Project name: prefer config project_name, then platform titles, then SHA
         let project_raw = c
-            .vercel
-            .as_ref()
-            .and_then(|e| e.title.as_deref())
+            .project_name
+            .as_deref()
+            .or_else(|| c.vercel.as_ref().and_then(|e| e.title.as_deref()))
             .or_else(|| c.railway.as_ref().and_then(|e| e.title.as_deref()))
             .or_else(|| c.github.as_ref().and_then(|e| e.title.as_deref()))
             .or_else(|| {

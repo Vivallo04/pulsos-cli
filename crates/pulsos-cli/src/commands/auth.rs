@@ -37,15 +37,15 @@ pub struct AuthArgs {
     pub ci: bool,
 
     /// GitHub token to store (requires --ci)
-    #[arg(long, value_name = "TOKEN")]
+    #[arg(long, value_name = "TOKEN", requires = "ci")]
     pub github_token: Option<String>,
 
     /// Railway token to store (requires --ci)
-    #[arg(long, value_name = "TOKEN")]
+    #[arg(long, value_name = "TOKEN", requires = "ci")]
     pub railway_token: Option<String>,
 
     /// Vercel token to store (requires --ci)
-    #[arg(long, value_name = "TOKEN")]
+    #[arg(long, value_name = "TOKEN", requires = "ci")]
     pub vercel_token: Option<String>,
 }
 

@@ -295,7 +295,7 @@ impl GitHubClient {
         Ok(perm.permission)
     }
 
-    fn run_to_event(run: &WorkflowRun, _repo: &str, is_from_cache: bool) -> DeploymentEvent {
+    fn run_to_event(run: &WorkflowRun, repo: &str, is_from_cache: bool) -> DeploymentEvent {
         let duration = match (run.run_started_at, run.updated_at) {
             (Some(start), end) => {
                 let diff = end - start;
@@ -319,6 +319,7 @@ impl GitHubClient {
             metadata: EventMetadata {
                 workflow_name: run.name.clone(),
                 trigger_event: Some(run.event.clone()),
+                source_id: Some(repo.to_string()),
                 ..Default::default()
             },
             is_from_cache,

@@ -35,11 +35,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 ratatui::style::Style::default()
             };
 
-            // Project identifier: prefer Vercel/Railway title, fall back to SHA prefix
+            // Project identifier: prefer config project_name, then platform titles, then SHA
             let project_name = corr
-                .vercel
-                .as_ref()
-                .and_then(|e| e.title.as_deref())
+                .project_name
+                .as_deref()
+                .or_else(|| corr.vercel.as_ref().and_then(|e| e.title.as_deref()))
                 .or_else(|| corr.railway.as_ref().and_then(|e| e.title.as_deref()))
                 .or_else(|| corr.github.as_ref().and_then(|e| e.title.as_deref()))
                 .or_else(|| {
@@ -146,6 +146,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 mod tests {
     use super::*;
     use crate::tui::app::{App, DataSnapshot};
+    use crate::tui::log_buffer::LogRingBuffer;
     use chrono::Utc;
     use pulsos_core::config::types::TuiConfig;
     use pulsos_core::domain::deployment::{
@@ -158,6 +159,7 @@ mod tests {
     fn sample_correlated_events() -> Vec<CorrelatedEvent> {
         vec![
             CorrelatedEvent {
+                project_name: Some("my-saas".into()),
                 commit_sha: Some("abc123def456".into()),
                 github: Some(DeploymentEvent {
                     id: "run-1".into(),
@@ -195,6 +197,7 @@ mod tests {
                 is_stale: false,
             },
             CorrelatedEvent {
+                project_name: None,
                 commit_sha: Some("def456ghi789".into()),
                 github: Some(DeploymentEvent {
                     id: "run-2".into(),
@@ -227,7 +230,7 @@ mod tests {
 
         let mut data = DataSnapshot::default();
         data.correlated = sample_correlated_events();
-        let app = App::new(data, TuiConfig::default());
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
 
         terminal
@@ -254,7 +257,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         let data = DataSnapshot::default();
-        let app = App::new(data, TuiConfig::default());
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
 
         terminal

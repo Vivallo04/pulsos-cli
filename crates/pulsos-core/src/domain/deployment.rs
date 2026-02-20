@@ -108,6 +108,10 @@ pub struct EventMetadata {
     pub preview_url: Option<String>,
     /// Vercel: target ("production" or preview)
     pub deploy_target: Option<String>,
+    /// The tracked resource platform_id this event was fetched for.
+    /// GitHub: "myorg/my-saas", Railway: "proj:svc:env", Vercel: "prj-001"
+    #[serde(default)]
+    pub source_id: Option<String>,
 }
 
 #[cfg(test)]

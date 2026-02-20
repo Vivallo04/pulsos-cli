@@ -149,13 +149,7 @@ pub async fn run_poller(
 ) {
     let mut resources = PlatformResources::from_correlations(&config.correlations);
 
-    let cache = match CacheStore::open_default() {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            tracing::error!("Failed to open cache store: {e}");
-            return;
-        }
-    };
+    let cache = Arc::new(CacheStore::open_or_temporary());
 
     let store: Arc<dyn CredentialStore> = match FallbackStore::new() {
         Ok(s) => Arc::new(s),

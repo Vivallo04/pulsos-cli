@@ -10,6 +10,7 @@ pub mod actions;
 pub mod app;
 pub mod event;
 pub mod keys;
+pub mod log_buffer;
 pub mod poll;
 pub mod render;
 pub mod settings_flow;
@@ -29,6 +30,7 @@ use pulsos_core::config::types::PulsosConfig;
 use self::actions::{ActionRequest, ActionResult};
 use self::app::{App, DataSnapshot};
 use self::event::AppEvent;
+use self::log_buffer::{LogRingBuffer, TuiActiveFlag};
 use self::poll::PollerCommand;
 use self::theme::Theme;
 
@@ -36,9 +38,17 @@ use self::theme::Theme;
 ///
 /// This is the main entry point called from `pulsos status --watch`.
 /// It sets up the terminal, spawns background tasks, and runs the event loop.
-pub async fn run_tui(config: PulsosConfig, config_path: Option<PathBuf>) -> Result<()> {
+pub async fn run_tui(
+    config: PulsosConfig,
+    config_path: Option<PathBuf>,
+    log_buffer: LogRingBuffer,
+    tui_active: TuiActiveFlag,
+) -> Result<()> {
     // Install panic hook that restores the terminal before printing the panic.
-    terminal::install_panic_hook();
+    terminal::install_panic_hook(Some(tui_active.clone()));
+
+    // Suppress stderr while TUI is active; logs go to ring buffer only.
+    tui_active.set_active(true);
 
     // Set up the terminal.
     let mut term = terminal::setup()?;
@@ -124,7 +134,7 @@ pub async fn run_tui(config: PulsosConfig, config_path: Option<PathBuf>) -> Resu
     });
 
     // Initialize the App state.
-    let mut app = App::new(initial_snapshot, config.tui.clone());
+    let mut app = App::new(initial_snapshot, config.tui.clone(), log_buffer);
 
     // Get initial terminal size.
     if let Ok((w, h)) = crossterm::terminal::size() {
@@ -186,6 +196,9 @@ pub async fn run_tui(config: PulsosConfig, config_path: Option<PathBuf>) -> Resu
             break;
         }
     }
+
+    // Re-enable stderr before restoring terminal.
+    tui_active.set_active(false);
 
     // Restore the terminal.
     terminal::teardown(&mut term)?;

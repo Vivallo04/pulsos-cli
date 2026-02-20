@@ -5,9 +5,9 @@ use std::io::IsTerminal;
 /// Render correlated events in compact single-line format (§4.28):
 ///
 /// ```text
-/// my-saas       ✓ ✓ ✓   98
-/// api-core      ✓ ✓ —   95
-/// auth-service  ✗ ✓ —   62
+/// my-saas       ✓ ✓ ✓
+/// api-core      ✓ ✓ —
+/// auth-service  ✗ ✓ —
 /// ```
 pub fn render_correlated(events: &[CorrelatedEvent]) {
     if events.is_empty() {
@@ -18,11 +18,11 @@ pub fn render_correlated(events: &[CorrelatedEvent]) {
     let colored = std::io::stdout().is_terminal() && std::env::var("NO_COLOR").is_err();
 
     for c in events {
-        // Project name
+        // Project name: prefer config project_name, then platform titles, then SHA
         let name_raw = c
-            .vercel
-            .as_ref()
-            .and_then(|e| e.title.as_deref())
+            .project_name
+            .as_deref()
+            .or_else(|| c.vercel.as_ref().and_then(|e| e.title.as_deref()))
             .or_else(|| c.railway.as_ref().and_then(|e| e.title.as_deref()))
             .or_else(|| c.github.as_ref().and_then(|e| e.title.as_deref()))
             .or_else(|| {
@@ -50,8 +50,19 @@ pub fn render_correlated(events: &[CorrelatedEvent]) {
             .map(|e| status_symbol_colored(&e.status, colored))
             .unwrap_or_else(|| dim_str("—", colored));
 
-        // Use a fixed-width name column
-        println!("{:<16}  {} {} {}", name_raw, gh_sym, rw_sym, vc_sym,);
+        // Use a fixed-width name column, truncated to 16 chars
+        let name_display = truncate(name_raw, 16);
+        println!("{:<16}  {} {} {}", name_display, gh_sym, rw_sym, vc_sym,);
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }
 
