@@ -16,11 +16,16 @@ use ratatui::{
 use crate::output::table::{format_age, format_duration};
 use crate::tui::app::App;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::status_spans;
-use pulsos_core::domain::deployment::{DeploymentEvent, Platform};
+use crate::tui::widgets::{draw_search_bar, split_search_bar, status_spans};
+use pulsos_core::domain::deployment::{DeploymentEvent, JobSummary, Platform};
 
 /// Draw the Platform Details table.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let (search_area, area) = split_search_bar(area, app);
+    if let Some(sa) = search_area {
+        draw_search_bar(frame, sa, app, theme);
+    }
+
     let header_cells = [
         "Status", "Platform", "Title", "SHA", "Detail", "Actor", "Age", "Dur",
     ]
@@ -88,7 +93,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 .map(|s| if s.len() > 7 { &s[..7] } else { s })
                 .unwrap_or("-");
 
-            let detail = platform_detail(event);
+            let detail_line = platform_detail(event, theme);
             let actor = event.actor.as_deref().unwrap_or("-");
             let age = format_age(event.created_at);
             let duration = event
@@ -101,7 +106,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 platform_cell,
                 Cell::from(Span::styled(title.to_string(), theme.t6())),
                 Cell::from(Span::styled(sha.to_string(), theme.active())),
-                Cell::from(Span::styled(detail, theme.t7())),
+                Cell::from(detail_line),
                 Cell::from(Span::styled(actor.to_string(), theme.t6())),
                 Cell::from(Span::styled(age, theme.t8())),
                 Cell::from(Span::styled(duration, theme.t8())),
@@ -123,7 +128,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::NONE))
-        .row_highlight_style(theme.selected_row());
+        .row_highlight_style(theme.selected_row())
+        .highlight_symbol("▶ ");
 
     let mut table_state = TableState::default();
     if !filtered_events.is_empty() {
@@ -136,43 +142,67 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-/// Build a platform-specific detail string.
-fn platform_detail(event: &DeploymentEvent) -> String {
+/// Build a platform-specific detail line (supports styled pipeline stages for GitHub).
+fn platform_detail(event: &DeploymentEvent, theme: &Theme) -> Line<'static> {
     match event.platform {
+        Platform::GitHub if !event.metadata.jobs.is_empty() => {
+            render_pipeline_stages(&event.metadata.jobs, theme)
+        }
         Platform::GitHub => {
             let workflow = event.metadata.workflow_name.as_deref().unwrap_or("");
             let trigger = event.metadata.trigger_event.as_deref().unwrap_or("");
-            if workflow.is_empty() && trigger.is_empty() {
-                "-".into()
+            let text = if workflow.is_empty() && trigger.is_empty() {
+                "-".to_string()
             } else if trigger.is_empty() {
-                workflow.into()
+                workflow.to_string()
             } else {
                 format!("{workflow} ({trigger})")
-            }
+            };
+            Line::from(Span::styled(text, theme.t7()))
         }
         Platform::Railway => {
             let service = event.metadata.service_name.as_deref().unwrap_or("");
             let env = event.metadata.environment_name.as_deref().unwrap_or("");
-            if service.is_empty() && env.is_empty() {
-                "-".into()
+            let text = if service.is_empty() && env.is_empty() {
+                "-".to_string()
             } else if env.is_empty() {
-                service.into()
+                service.to_string()
             } else {
                 format!("{service} / {env}")
-            }
+            };
+            Line::from(Span::styled(text, theme.t7()))
         }
         Platform::Vercel => {
             let target = event.metadata.deploy_target.as_deref().unwrap_or("");
             let preview = event.metadata.preview_url.as_deref().unwrap_or("");
-            if target.is_empty() && preview.is_empty() {
-                "-".into()
+            let text = if target.is_empty() && preview.is_empty() {
+                "-".to_string()
             } else if preview.is_empty() {
-                target.into()
+                target.to_string()
             } else {
                 format!("{target} → {preview}")
-            }
+            };
+            Line::from(Span::styled(text, theme.t7()))
         }
     }
+}
+
+/// Render pipeline stages as `● Build › ● Test › ✕ Deploy`.
+fn render_pipeline_stages(jobs: &[JobSummary], theme: &Theme) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, job) in jobs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" › ".to_string(), theme.t8()));
+        }
+        let (icon, _label, style) = status_spans(&job.status, theme);
+        let short_name: String = if job.name.len() > 8 {
+            format!("{}…", &job.name[..7])
+        } else {
+            job.name.clone()
+        };
+        spans.push(Span::styled(format!("{icon}{short_name}"), style));
+    }
+    Line::from(spans)
 }
 
 #[cfg(test)]
@@ -274,8 +304,14 @@ mod tests {
         assert!(text.contains("abc123"), "Should show SHA");
     }
 
+    /// Extract plain text from a Line for assertion purposes.
+    fn line_to_string(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
     #[test]
     fn platform_detail_github() {
+        let theme = Theme::dark();
         let event = DeploymentEvent {
             id: "x".into(),
             platform: Platform::GitHub,
@@ -295,11 +331,12 @@ mod tests {
             },
             is_from_cache: false,
         };
-        assert_eq!(platform_detail(&event), "CI (push)");
+        assert_eq!(line_to_string(&platform_detail(&event, &theme)), "CI (push)");
     }
 
     #[test]
     fn platform_detail_railway() {
+        let theme = Theme::dark();
         let event = DeploymentEvent {
             id: "x".into(),
             platform: Platform::Railway,
@@ -319,11 +356,12 @@ mod tests {
             },
             is_from_cache: false,
         };
-        assert_eq!(platform_detail(&event), "api / prod");
+        assert_eq!(line_to_string(&platform_detail(&event, &theme)), "api / prod");
     }
 
     #[test]
     fn platform_detail_vercel() {
+        let theme = Theme::dark();
         let event = DeploymentEvent {
             id: "x".into(),
             platform: Platform::Vercel,
@@ -343,7 +381,56 @@ mod tests {
             },
             is_from_cache: false,
         };
-        assert_eq!(platform_detail(&event), "production → abc.vercel.app");
+        assert_eq!(
+            line_to_string(&platform_detail(&event, &theme)),
+            "production → abc.vercel.app"
+        );
+    }
+
+    #[test]
+    fn pipeline_stages_render() {
+        use pulsos_core::domain::deployment::JobSummary;
+
+        let theme = Theme::dark();
+        let event = DeploymentEvent {
+            id: "run-99".into(),
+            platform: Platform::GitHub,
+            status: DeploymentStatus::Failed,
+            commit_sha: Some("abc123".into()),
+            branch: Some("main".into()),
+            title: Some("CI".into()),
+            actor: None,
+            created_at: Utc::now(),
+            updated_at: None,
+            duration_secs: None,
+            url: None,
+            metadata: EventMetadata {
+                workflow_name: Some("CI".into()),
+                trigger_event: Some("push".into()),
+                jobs: vec![
+                    JobSummary {
+                        name: "Build".into(),
+                        status: DeploymentStatus::Success,
+                    },
+                    JobSummary {
+                        name: "Test".into(),
+                        status: DeploymentStatus::Success,
+                    },
+                    JobSummary {
+                        name: "Deploy".into(),
+                        status: DeploymentStatus::Failed,
+                    },
+                ],
+                ..Default::default()
+            },
+            is_from_cache: false,
+        };
+        let line = platform_detail(&event, &theme);
+        let text = line_to_string(&line);
+        assert!(text.contains("Build"), "Should contain Build job");
+        assert!(text.contains("Test"), "Should contain Test job");
+        assert!(text.contains("Deploy"), "Should contain Deploy job");
+        assert!(text.contains(" › "), "Should contain arrow separator");
     }
 
     fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {

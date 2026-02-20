@@ -16,6 +16,7 @@ pub mod render;
 pub mod settings_flow;
 pub mod terminal;
 pub mod theme;
+mod visual_check;
 pub mod widgets;
 
 use std::time::Duration;
@@ -51,7 +52,13 @@ pub async fn run_tui(
     tui_active.set_active(true);
 
     // Set up the terminal.
-    let mut term = terminal::setup()?;
+    let mut term = match terminal::setup() {
+        Ok(t) => t,
+        Err(e) => {
+            tui_active.set_active(false);
+            return Err(e);
+        }
+    };
 
     // Resolve theme from config + environment.
     let theme = Theme::resolve(&config.tui.theme);
@@ -156,37 +163,40 @@ pub async fn run_tui(
         })?;
 
         // Wait for the next event.
-        if let Some(event) = event_rx.recv().await {
-            match event {
-                AppEvent::Key(key) => {
-                    // Handle force refresh: if the key handler sets the flag,
-                    // send a signal to the poller.
-                    keys::handle_key(&mut app, key);
-                    if app.force_refresh {
-                        let _ = poller_tx.try_send(PollerCommand::ForceRefresh);
-                        app.force_refresh = false;
-                    }
-                    if let Some(request) = app.take_pending_action() {
-                        if action_req_tx.try_send(request).is_err() {
-                            app.settings_action_in_flight = false;
-                            app.last_error = Some("Action queue is busy; try again.".to_string());
-                        }
+        let Some(event) = event_rx.recv().await else {
+            // All event senders dropped — exit gracefully.
+            break;
+        };
+
+        match event {
+            AppEvent::Key(key) => {
+                // Handle force refresh: if the key handler sets the flag,
+                // send a signal to the poller.
+                keys::handle_key(&mut app, key);
+                if app.force_refresh {
+                    let _ = poller_tx.try_send(PollerCommand::ForceRefresh);
+                    app.force_refresh = false;
+                }
+                if let Some(request) = app.take_pending_action() {
+                    if action_req_tx.try_send(request).is_err() {
+                        app.settings_action_in_flight = false;
+                        app.last_error = Some("Action queue is busy; try again.".to_string());
                     }
                 }
-                AppEvent::Tick => {
-                    // Nothing to do — the render above already refreshes the UI.
+            }
+            AppEvent::Tick => {
+                // Nothing to do — the render above already refreshes the UI.
+            }
+            AppEvent::Resize(w, h) => {
+                app.terminal_size = (w, h);
+            }
+            AppEvent::ActionResult(result) => {
+                let outcome = app.handle_action_result(result);
+                if let Some(config) = outcome.replace_config {
+                    let _ = poller_tx.try_send(PollerCommand::ReplaceConfig(config));
                 }
-                AppEvent::Resize(w, h) => {
-                    app.terminal_size = (w, h);
-                }
-                AppEvent::ActionResult(result) => {
-                    let outcome = app.handle_action_result(result);
-                    if let Some(config) = outcome.replace_config {
-                        let _ = poller_tx.try_send(PollerCommand::ReplaceConfig(config));
-                    }
-                    if outcome.force_refresh {
-                        let _ = poller_tx.try_send(PollerCommand::ForceRefresh);
-                    }
+                if outcome.force_refresh {
+                    let _ = poller_tx.try_send(PollerCommand::ForceRefresh);
                 }
             }
         }

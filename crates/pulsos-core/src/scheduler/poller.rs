@@ -21,6 +21,9 @@ where
     F: Fn(&'items T) -> Fut,
     Fut: Future<Output = R>,
 {
+    if batch_size == 0 {
+        return Vec::new();
+    }
     let mut results = Vec::with_capacity(items.len());
     let chunks: Vec<&[T]> = items.chunks(batch_size).collect();
     let num_chunks = chunks.len();

@@ -26,6 +26,12 @@ pub enum DeploymentStatus {
     Unknown(String),
 }
 
+impl Default for DeploymentStatus {
+    fn default() -> Self {
+        Self::Unknown("unknown".into())
+    }
+}
+
 impl fmt::Display for DeploymentStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -93,6 +99,13 @@ pub struct DeploymentEvent {
     pub is_from_cache: bool,
 }
 
+/// Summary of a single workflow job (GitHub Actions pipeline stage).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JobSummary {
+    pub name: String,
+    pub status: DeploymentStatus,
+}
+
 /// Platform-specific metadata that doesn't fit the unified model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EventMetadata {
@@ -112,6 +125,9 @@ pub struct EventMetadata {
     /// GitHub: "myorg/my-saas", Railway: "proj:svc:env", Vercel: "prj-001"
     #[serde(default)]
     pub source_id: Option<String>,
+    /// GitHub: workflow job summaries (pipeline stages).
+    #[serde(default)]
+    pub jobs: Vec<JobSummary>,
 }
 
 #[cfg(test)]

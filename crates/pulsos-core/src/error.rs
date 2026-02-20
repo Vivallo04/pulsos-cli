@@ -121,7 +121,13 @@ impl PulsosError {
                     _ => format!("Unexpected HTTP {status} from {platform}."),
                 };
                 let body_preview = if body.len() > 200 {
-                    format!("{}...", &body[..200])
+                    let truncate_at = body
+                        .char_indices()
+                        .take_while(|(i, _)| *i < 200)
+                        .last()
+                        .map(|(i, c)| i + c.len_utf8())
+                        .unwrap_or(0);
+                    format!("{}...", &body[..truncate_at])
                 } else {
                     body.clone()
                 };

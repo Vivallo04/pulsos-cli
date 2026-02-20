@@ -218,6 +218,8 @@ pub async fn run_poller(
         let pre_correlated = correlation::correlate_all(&config.correlations, &pre_events);
         let pre_health_scores =
             health::compute_project_health_scores(&config.correlations, &pre_events);
+        let pre_health_breakdowns =
+            health::compute_project_health_breakdowns(&config.correlations, &pre_events);
         let pre_health_history: Vec<(String, Vec<u8>)> = health_history
             .iter()
             .map(|(name, history)| (name.clone(), history.clone()))
@@ -227,6 +229,7 @@ pub async fn run_poller(
             events: pre_events,
             correlated: pre_correlated,
             health_scores: pre_health_scores,
+            health_breakdowns: pre_health_breakdowns,
             health_history: pre_health_history,
             warnings: last_cycle_warnings.clone(),
             platform_health: last_platform_health.clone(),
@@ -344,9 +347,11 @@ pub async fn run_poller(
         // Build correlated events using core correlation engine.
         let correlated = correlation::correlate_all(&config.correlations, &all_events);
 
-        // Compute health scores per correlation.
+        // Compute health scores and breakdowns per correlation.
         let health_scores =
             health::compute_project_health_scores(&config.correlations, &all_events);
+        let health_breakdowns =
+            health::compute_project_health_breakdowns(&config.correlations, &all_events);
 
         // Update health history ring buffer.
         for (name, score) in &health_scores {
@@ -367,6 +372,7 @@ pub async fn run_poller(
             events: all_events,
             correlated,
             health_scores,
+            health_breakdowns,
             health_history: health_history_snapshot,
             warnings: warnings.clone(),
             platform_health: last_platform_health.clone(),

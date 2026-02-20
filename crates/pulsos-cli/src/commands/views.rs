@@ -139,7 +139,7 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
 
     // Name (required)
     let name_spec = ScreenSpec::new("Create View")
-        .step(1, 5)
+        .step(1, 6)
         .body_lines(["Enter a name for the new view."]);
     let name: String = match screen_input(&screen, &name_spec, "View name", None, false)? {
         PromptResult {
@@ -164,7 +164,7 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
 
     // Description (optional)
     let desc_spec = ScreenSpec::new("Create View")
-        .step(2, 5)
+        .step(2, 6)
         .body_lines(["Optionally add a description."]);
     let description: String = match screen_input(
         &screen,
@@ -192,7 +192,7 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
     let platform_options = &["github", "railway", "vercel"];
     let platform_defaults: Vec<bool> = vec![false; platform_options.len()];
     let platform_spec = ScreenSpec::new("Create View")
-        .step(3, 5)
+        .step(3, 6)
         .body_lines([
             "Select platforms to include in this view.",
             "All options are disabled by default.",
@@ -219,7 +219,7 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
 
     // Projects (freetext, comma-separated)
     let projects_spec = ScreenSpec::new("Create View")
-        .step(4, 5)
+        .step(4, 6)
         .body_lines(["Projects (comma-separated), or empty for all."]);
     let projects_input: String = match screen_input(
         &screen,
@@ -244,7 +244,7 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
 
     // Branch filter (optional)
     let branch_spec = ScreenSpec::new("Create View")
-        .step(4, 5)
+        .step(5, 6)
         .body_lines(["Optional branch filter (e.g. main, feature/)."]);
     let branch_input: String = match screen_input(
         &screen,
@@ -297,7 +297,7 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
 
     println!();
     let save_spec = ScreenSpec::new("Create View")
-        .step(5, 5)
+        .step(6, 6)
         .body_lines(["Review complete. Save this view?"]);
     let save = match screen_confirm(&screen, &save_spec, "Save this view?", true)? {
         PromptResult {
@@ -390,7 +390,7 @@ fn edit_view(name: &str, config_path: Option<&Path>) -> Result<()> {
 
     // Name
     let new_name_spec = ScreenSpec::new("Edit View")
-        .step(1, 4)
+        .step(1, 6)
         .body_lines(["Update view name."]);
     let new_name: String = match screen_input(
         &screen,
@@ -423,7 +423,7 @@ fn edit_view(name: &str, config_path: Option<&Path>) -> Result<()> {
     // Description
     let desc_current = existing.description.as_deref().unwrap_or("");
     let desc_spec = ScreenSpec::new("Edit View")
-        .step(1, 4)
+        .step(2, 6)
         .body_lines(["Update description (optional)."]);
     let new_desc: String = match screen_input(
         &screen,
@@ -454,7 +454,7 @@ fn edit_view(name: &str, config_path: Option<&Path>) -> Result<()> {
         .map(|p| existing.platforms.iter().any(|ep| ep == p))
         .collect();
     let platform_spec = ScreenSpec::new("Edit View")
-        .step(2, 4)
+        .step(3, 6)
         .body_lines(["Update included platforms."]);
     let platform_selections = match screen_multiselect(
         &screen,
@@ -479,7 +479,7 @@ fn edit_view(name: &str, config_path: Option<&Path>) -> Result<()> {
     // Projects
     let projects_current = existing.projects.join(", ");
     let projects_spec = ScreenSpec::new("Edit View")
-        .step(3, 4)
+        .step(4, 6)
         .body_lines(["Update projects (comma-separated), or empty for all."]);
     let projects_input: String = match screen_input(
         &screen,
@@ -505,7 +505,7 @@ fn edit_view(name: &str, config_path: Option<&Path>) -> Result<()> {
     // Branch filter
     let branch_current = existing.branch_filter.as_deref().unwrap_or("");
     let branch_spec = ScreenSpec::new("Edit View")
-        .step(3, 4)
+        .step(5, 6)
         .body_lines(["Update optional branch filter."]);
     let branch_input: String = match screen_input(
         &screen,
@@ -558,7 +558,7 @@ fn edit_view(name: &str, config_path: Option<&Path>) -> Result<()> {
 
     println!();
     let save_spec = ScreenSpec::new("Edit View")
-        .step(4, 4)
+        .step(6, 6)
         .body_lines(["Save these changes?"]);
     let save = match screen_confirm(&screen, &save_spec, "Save changes?", true)? {
         PromptResult {
@@ -728,8 +728,8 @@ fn import_view(file: &Path, config_path: Option<&Path>) -> Result<()> {
     let view: ViewConfig = serde_json::from_str(&content)
         .map_err(|e| anyhow::anyhow!("Failed to parse view JSON: {e}"))?;
 
-    let name = view.name.trim().to_string();
-    if name.is_empty() {
+    let trimmed_name = view.name.trim().to_string();
+    if trimmed_name.is_empty() {
         anyhow::bail!("Invalid view: name is empty.");
     }
     let allowed_platforms = ["github", "railway", "vercel"];
@@ -744,15 +744,16 @@ fn import_view(file: &Path, config_path: Option<&Path>) -> Result<()> {
     if config
         .views
         .iter()
-        .any(|v| v.name.eq_ignore_ascii_case(&view.name))
+        .any(|v| v.name.eq_ignore_ascii_case(&trimmed_name))
     {
-        anyhow::bail!("A view named '{}' already exists.", view.name);
+        anyhow::bail!("A view named '{}' already exists.", trimmed_name);
     }
 
-    let view_name = view.name.clone();
+    let mut view = view;
+    view.name = trimmed_name.clone();
     config.views.push(view);
     save_config(&config, config_path).map_err(|e| anyhow::anyhow!("Failed to save config: {e}"))?;
 
-    println!("View '{view_name}' imported.");
+    println!("View '{trimmed_name}' imported.");
     Ok(())
 }

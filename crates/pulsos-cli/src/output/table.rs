@@ -55,6 +55,9 @@ pub(crate) fn status_indicator(status: &DeploymentStatus) -> String {
 pub(crate) fn format_age(created_at: chrono::DateTime<Utc>) -> String {
     let diff = Utc::now() - created_at;
     let secs = diff.num_seconds();
+    if secs < 0 {
+        return "just now".into();
+    }
     if secs < 60 {
         "just now".into()
     } else if secs < 3600 {
@@ -234,7 +237,8 @@ pub fn render_health_scores(scores: &[(String, u8)]) {
 
     for (name, score) in scores {
         let (score_open, score_close) = health_color_ansi(*score, colored);
-        let filled = (*score as usize * 20) / 100;
+        let clamped = (*score).min(100) as usize;
+        let filled = (clamped * 20) / 100;
         let empty = 20 - filled;
         let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
         println!(

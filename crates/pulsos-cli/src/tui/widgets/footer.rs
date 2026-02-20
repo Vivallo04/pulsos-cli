@@ -81,13 +81,16 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
         ));
     }
 
-    let entries = [
+    let mut entries: Vec<(&str, &str)> = vec![
         ("[q]", "quit"),
         ("[Tab]", "switch tab (1-5)"),
         ("[↵]", "select"),
         ("[/]", "search"),
         ("[r]", "refresh"),
     ];
+    if app.active_tab == Tab::Logs {
+        entries.push(("[f]", "filter"));
+    }
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (i, (key, desc)) in entries.iter().enumerate() {
         if i > 0 {
@@ -147,6 +150,9 @@ fn format_sync_status(app: &App) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
     if s.chars().count() <= max {
         s.to_string()
     } else {
@@ -173,10 +179,16 @@ fn settings_help_text(flow: SettingsFlowState) -> &'static str {
 #[cfg(test)]
 pub fn render_help_text(app: &App) -> String {
     match app.input_mode {
-        InputMode::Normal if app.active_tab != Tab::Settings => {
+        InputMode::Normal if app.active_tab == Tab::Settings => {
+            settings_help_text(app.settings_flow).to_string()
+        }
+        InputMode::Normal if app.active_tab == Tab::Logs => {
+            "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [f] filter"
+                .to_string()
+        }
+        InputMode::Normal => {
             "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh".to_string()
         }
-        InputMode::Normal => settings_help_text(app.settings_flow).to_string(),
         InputMode::Search => format!("[Esc] cancel  [↵] apply  Filter: {}█", app.search_query),
     }
 }
@@ -253,6 +265,22 @@ mod tests {
         app.active_tab = Tab::Settings;
         app.settings_flow = SettingsFlowState::Applying;
         assert_eq!(render_help_text(&app), copy::SETTINGS_BUSY);
+    }
+
+    #[test]
+    fn footer_shows_filter_hint_on_logs_tab() {
+        let mut app = test_app();
+        app.active_tab = Tab::Logs;
+        let text = render_help_text(&app);
+        assert!(text.contains("[f]"));
+        assert!(text.contains("filter"));
+    }
+
+    #[test]
+    fn footer_no_filter_hint_on_other_tabs() {
+        let app = test_app();
+        let text = render_help_text(&app);
+        assert!(!text.contains("[f]"));
     }
 
     #[test]

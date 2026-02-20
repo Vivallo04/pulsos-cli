@@ -69,7 +69,7 @@ fn edit_config(config_path: Option<&Path>) -> Result<()> {
         // Write the default config if the file doesn't yet exist.
         let default_toml =
             toml::to_string_pretty(&pulsos_core::config::types::PulsosConfig::default())
-                .unwrap_or_default();
+                .map_err(|e| anyhow::anyhow!("Failed to serialize default config: {e}"))?;
         std::fs::write(&path, default_toml)?;
     }
 

@@ -28,11 +28,16 @@ pub fn find_closest_by_timestamp(
     claimed: &[bool],
     window_secs: i64,
 ) -> Option<HeuristicMatch> {
+    debug_assert_eq!(
+        candidates.len(),
+        claimed.len(),
+        "candidates and claimed slices must have the same length"
+    );
     let ref_ts = reference.created_at.timestamp();
     let mut best: Option<HeuristicMatch> = None;
 
     for (i, candidate) in candidates.iter().enumerate() {
-        if claimed[i] {
+        if *claimed.get(i).unwrap_or(&true) {
             continue;
         }
 

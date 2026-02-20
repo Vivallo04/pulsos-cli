@@ -78,6 +78,12 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             app.clamp_selection();
         }
 
+        // Log filter cycling
+        KeyCode::Char('f') if app.active_tab == Tab::Logs => {
+            app.log_filter = app.log_filter.next();
+            app.selected_row = 0;
+        }
+
         // Force refresh
         KeyCode::Char('r') => {
             app.force_refresh = true;
@@ -295,8 +301,11 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
             app.search_query.pop();
         }
 
-        // Type character
-        KeyCode::Char(c) => {
+        // Type character (ignore Ctrl/Alt-modified keys)
+        KeyCode::Char(c)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
             app.search_query.push(c);
         }
 
@@ -308,8 +317,8 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
 mod tests {
     use super::*;
     use crate::tui::actions::ActionRequest;
-    use crate::tui::app::{DataSnapshot, InputMode, Tab};
-    use crate::tui::log_buffer::LogRingBuffer;
+    use crate::tui::app::{DataSnapshot, InputMode, LogFilter, Tab};
+    use crate::tui::log_buffer::{LogEntry, LogRingBuffer};
     use crate::tui::settings_flow::SettingsFlowState;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use chrono::Utc;
@@ -631,5 +640,62 @@ mod tests {
             app.settings_message.as_deref(),
             Some("cannot remove env token; unset it in shell")
         );
+    }
+
+    fn logs_app() -> App {
+        let log_buffer = LogRingBuffer::new();
+        log_buffer.push(LogEntry {
+            timestamp: Utc::now(),
+            level: tracing::Level::ERROR,
+            target: String::new(),
+            message: "error msg".into(),
+        });
+        log_buffer.push(LogEntry {
+            timestamp: Utc::now(),
+            level: tracing::Level::WARN,
+            target: String::new(),
+            message: "warn msg".into(),
+        });
+        log_buffer.push(LogEntry {
+            timestamp: Utc::now(),
+            level: tracing::Level::INFO,
+            target: String::new(),
+            message: "info msg".into(),
+        });
+        let mut app = App::new(DataSnapshot::default(), TuiConfig::default(), log_buffer);
+        app.active_tab = Tab::Logs;
+        app
+    }
+
+    #[test]
+    fn logs_filter_cycles_with_f() {
+        let mut app = logs_app();
+        assert_eq!(app.log_filter, LogFilter::All);
+
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        assert_eq!(app.log_filter, LogFilter::Error);
+        assert_eq!(app.selected_row, 0);
+
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        assert_eq!(app.log_filter, LogFilter::Warn);
+
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        assert_eq!(app.log_filter, LogFilter::Info);
+
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        assert_eq!(app.log_filter, LogFilter::All);
+    }
+
+    #[test]
+    fn f_key_does_nothing_on_other_tabs() {
+        let mut app = test_app();
+        app.active_tab = Tab::Unified;
+        let filter_before = app.log_filter;
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        assert_eq!(app.log_filter, filter_before);
+
+        app.active_tab = Tab::Health;
+        handle_key(&mut app, make_key(KeyCode::Char('f')));
+        assert_eq!(app.log_filter, filter_before);
     }
 }

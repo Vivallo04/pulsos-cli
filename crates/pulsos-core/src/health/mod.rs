@@ -175,8 +175,9 @@ fn classify_error(err: &PulsosError) -> PlatformHealthState {
         | PulsosError::Config(_)
         | PulsosError::Cache(_)
         | PulsosError::Keyring(_)
-        | PulsosError::NoConfig
-        | PulsosError::Other(_) => PlatformHealthState::ConnectivityError,
+        | PulsosError::NoConfig => PlatformHealthState::AccessOrConfigIncomplete,
+
+        PulsosError::Other(_) => PlatformHealthState::ConnectivityError,
     }
 }
 

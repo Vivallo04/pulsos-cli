@@ -260,8 +260,11 @@ async fn check_rate_limits(resolver: &TokenResolver, cache: &Arc<CacheStore>) ->
                     results.push(CheckResult::ok("GitHub", value));
                 }
             }
-            Err(_) => {
-                results.push(CheckResult::ok("GitHub", "OK"));
+            Err(e) => {
+                results.push(CheckResult::warning(
+                    "GitHub",
+                    format!("Unable to fetch rate limits: {e}"),
+                ));
             }
         }
     } else {
@@ -342,18 +345,20 @@ fn check_tracked_resources(config: &Option<PulsosConfig>) -> Vec<CheckResult> {
     if !railway_groups.is_empty() {
         let total: usize = railway_groups.values().sum();
         let detail = format_groups(&railway_groups);
+        let noun = if total == 1 { "project" } else { "projects" };
         results.push(CheckResult::ok(
             "Railway",
-            format!("{total} projects ({detail})"),
+            format!("{total} {noun} ({detail})"),
         ));
     }
 
     if !vercel_groups.is_empty() {
         let total: usize = vercel_groups.values().sum();
         let detail = format_groups(&vercel_groups);
+        let noun = if total == 1 { "project" } else { "projects" };
         results.push(CheckResult::ok(
             "Vercel",
-            format!("{total} projects ({detail})"),
+            format!("{total} {noun} ({detail})"),
         ));
     }
 
@@ -634,8 +639,8 @@ mod tests {
         // Should have GitHub (2 repos) + Railway (1 project) + Vercel (1 project) = 3 results
         assert_eq!(results.len(), 3);
         assert!(results[0].value.contains("2 repos"));
-        assert!(results[1].value.contains("1 projects"));
-        assert!(results[2].value.contains("1 projects"));
+        assert!(results[1].value.contains("1 project"));
+        assert!(results[2].value.contains("1 project"));
     }
 
     #[test]

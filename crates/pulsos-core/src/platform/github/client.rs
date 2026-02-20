@@ -1,5 +1,5 @@
 use crate::cache::store::CacheStore;
-use crate::domain::deployment::{DeploymentEvent, EventMetadata, Platform};
+use crate::domain::deployment::{DeploymentEvent, DeploymentStatus, EventMetadata, JobSummary, Platform};
 use crate::error::PulsosError;
 use crate::platform::{
     AuthStatus, DiscoveredResource, PlatformAdapter, RateLimitInfo, TrackedResource,
@@ -13,7 +13,8 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use super::types::{
-    GhCollaboratorPermission, GhOrg, GhRateLimit, GhRepo, GhUser, WorkflowRun, WorkflowRunsResponse,
+    GhCollaboratorPermission, GhOrg, GhRateLimit, GhRepo, GhUser, WorkflowJob,
+    WorkflowJobsResponse, WorkflowRun, WorkflowRunsResponse,
 };
 
 pub struct GitHubClient {
@@ -295,6 +296,81 @@ impl GitHubClient {
         Ok(perm.permission)
     }
 
+    /// Fetch workflow jobs for a specific run.
+    async fn fetch_jobs_for_run(
+        &self,
+        repo: &str,
+        run_id: u64,
+    ) -> Result<Vec<WorkflowJob>, PulsosError> {
+        let url = format!(
+            "{}/repos/{}/actions/runs/{}/jobs",
+            self.base_url, repo, run_id
+        );
+        let headers = self.auth_headers()?;
+        let resp = self
+            .client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await
+            .map_err(|e| PulsosError::Network {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+                source: Some(e),
+            })?;
+
+        self.update_rate_limit(&resp).await;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(PulsosError::ApiError {
+                platform: "GitHub".into(),
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let body: WorkflowJobsResponse =
+            resp.json().await.map_err(|e| PulsosError::ParseError {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+            })?;
+
+        Ok(body.jobs)
+    }
+
+    /// Convert a `WorkflowJob` to a `JobSummary`.
+    fn job_to_summary(job: &WorkflowJob) -> JobSummary {
+        // Reuse WorkflowRun's status mapping via a temporary run
+        let status = match job.status {
+            super::types::GhRunStatus::Completed => match job.conclusion {
+                Some(super::types::GhConclusion::Success)
+                | Some(super::types::GhConclusion::Neutral)
+                | Some(super::types::GhConclusion::Stale) => DeploymentStatus::Success,
+                Some(super::types::GhConclusion::Failure)
+                | Some(super::types::GhConclusion::StartupFailure)
+                | Some(super::types::GhConclusion::TimedOut) => DeploymentStatus::Failed,
+                Some(super::types::GhConclusion::Cancelled) => DeploymentStatus::Cancelled,
+                Some(super::types::GhConclusion::Skipped) => DeploymentStatus::Skipped,
+                Some(super::types::GhConclusion::ActionRequired) => {
+                    DeploymentStatus::ActionRequired
+                }
+                _ => DeploymentStatus::Unknown("unknown".into()),
+            },
+            super::types::GhRunStatus::InProgress => DeploymentStatus::InProgress,
+            super::types::GhRunStatus::Queued
+            | super::types::GhRunStatus::Waiting
+            | super::types::GhRunStatus::Requested
+            | super::types::GhRunStatus::Pending => DeploymentStatus::Queued,
+            super::types::GhRunStatus::Unknown => DeploymentStatus::Unknown("unknown".into()),
+        };
+        JobSummary {
+            name: job.name.clone(),
+            status,
+        }
+    }
+
     fn run_to_event(run: &WorkflowRun, repo: &str, is_from_cache: bool) -> DeploymentEvent {
         let duration = match (run.run_started_at, run.updated_at) {
             (Some(start), end) => {
@@ -337,8 +413,20 @@ impl PlatformAdapter for GitHubClient {
         for resource in tracked {
             match self.fetch_workflow_runs(&resource.platform_id).await {
                 Ok(runs) => {
-                    for run in &runs {
-                        all_events.push(Self::run_to_event(run, &resource.platform_id, false));
+                    for (i, run) in runs.iter().enumerate() {
+                        let mut event =
+                            Self::run_to_event(run, &resource.platform_id, false);
+                        // Fetch jobs for the most recent 3 runs to populate pipeline stages
+                        if i < 3 {
+                            if let Ok(jobs) = self
+                                .fetch_jobs_for_run(&resource.platform_id, run.id)
+                                .await
+                            {
+                                event.metadata.jobs =
+                                    jobs.iter().map(Self::job_to_summary).collect();
+                            }
+                        }
+                        all_events.push(event);
                     }
                 }
                 Err(e) => {

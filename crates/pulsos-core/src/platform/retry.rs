@@ -30,7 +30,8 @@ pub async fn send_with_retry(
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(5);
+                .unwrap_or(5)
+                .min(60);
             tracing::warn!(
                 platform = platform,
                 delay_secs = delay_secs,

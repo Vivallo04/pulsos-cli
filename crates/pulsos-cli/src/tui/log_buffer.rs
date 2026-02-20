@@ -21,6 +21,7 @@ const RING_CAPACITY: usize = 500;
 pub struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub level: Level,
+    pub target: String,
     pub message: String,
 }
 
@@ -112,6 +113,7 @@ impl<'a> MakeWriter<'a> for DualWriterFactory {
             tui_active: self.tui_active.clone(),
             line_buf: Vec::new(),
             level_hint: None,
+            target_hint: None,
         }
     }
 
@@ -121,6 +123,7 @@ impl<'a> MakeWriter<'a> for DualWriterFactory {
             tui_active: self.tui_active.clone(),
             line_buf: Vec::new(),
             level_hint: Some(*meta.level()),
+            target_hint: Some(meta.target().to_string()),
         }
     }
 }
@@ -131,6 +134,7 @@ pub struct DualWriter {
     tui_active: TuiActiveFlag,
     line_buf: Vec<u8>,
     level_hint: Option<Level>,
+    target_hint: Option<String>,
 }
 
 impl DualWriter {
@@ -192,6 +196,7 @@ impl io::Write for DualWriter {
                 self.buffer.push(LogEntry {
                     timestamp: Utc::now(),
                     level,
+                    target: self.target_hint.clone().unwrap_or_default(),
                     message,
                 });
             }
@@ -218,6 +223,7 @@ impl io::Write for DualWriter {
                 self.buffer.push(LogEntry {
                     timestamp: Utc::now(),
                     level,
+                    target: self.target_hint.clone().unwrap_or_default(),
                     message,
                 });
             }
@@ -247,6 +253,7 @@ mod tests {
         buf.push(LogEntry {
             timestamp: Utc::now(),
             level: Level::INFO,
+            target: String::new(),
             message: "hello".into(),
         });
         assert_eq!(buf.len(), 1);
@@ -255,6 +262,7 @@ mod tests {
         buf.push(LogEntry {
             timestamp: Utc::now(),
             level: Level::WARN,
+            target: String::new(),
             message: "world".into(),
         });
         assert_eq!(buf.len(), 2);
@@ -273,6 +281,7 @@ mod tests {
             buf.push(LogEntry {
                 timestamp: Utc::now(),
                 level: Level::INFO,
+                target: String::new(),
                 message: format!("msg-{i}"),
             });
         }
@@ -324,6 +333,7 @@ mod tests {
             tui_active: TuiActiveFlag::new(),
             line_buf: Vec::new(),
             level_hint: Some(Level::ERROR),
+            target_hint: None,
         };
         writer
             .write_all(b"  ERROR connection refused\n")

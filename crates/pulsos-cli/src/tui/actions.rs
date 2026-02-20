@@ -17,7 +17,7 @@ use pulsos_core::sync::merge::{merge_correlations, populate_platform_sections};
 
 use super::settings_flow::DiscoveryPayload;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum ActionRequest {
     ValidateAndStoreToken {
         platform: PlatformKind,
@@ -38,6 +38,36 @@ pub enum ActionRequest {
     ApplyCorrelations {
         discovery: DiscoveryPayload,
     },
+}
+
+impl std::fmt::Debug for ActionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ValidateAndStoreToken { platform, .. } => f
+                .debug_struct("ValidateAndStoreToken")
+                .field("platform", platform)
+                .field("token", &"[REDACTED]")
+                .finish(),
+            Self::RemoveToken { platform } => f
+                .debug_struct("RemoveToken")
+                .field("platform", platform)
+                .finish(),
+            Self::ValidatePlatform { platform } => f
+                .debug_struct("ValidatePlatform")
+                .field("platform", platform)
+                .finish(),
+            Self::Discover { platforms } => f
+                .debug_struct("Discover")
+                .field("platforms", platforms)
+                .finish(),
+            Self::BuildCorrelationPreview { .. } => f
+                .debug_struct("BuildCorrelationPreview")
+                .finish_non_exhaustive(),
+            Self::ApplyCorrelations { .. } => f
+                .debug_struct("ApplyCorrelations")
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

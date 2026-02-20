@@ -5,6 +5,7 @@ use pulsos_core::auth::PlatformKind;
 use pulsos_core::config::types::PulsosConfig;
 use pulsos_core::config::types::TuiConfig;
 use pulsos_core::domain::deployment::DeploymentEvent;
+use pulsos_core::domain::health::HealthBreakdown;
 use pulsos_core::domain::project::CorrelatedEvent;
 use pulsos_core::health::PlatformHealthReport;
 
@@ -89,6 +90,44 @@ pub enum InputMode {
     Search,
 }
 
+/// Log level filter for the Logs tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFilter {
+    All,
+    Error,
+    Warn,
+    Info,
+}
+
+impl LogFilter {
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Error,
+            Self::Error => Self::Warn,
+            Self::Warn => Self::Info,
+            Self::Info => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "ALL",
+            Self::Error => "ERR",
+            Self::Warn => "WARN",
+            Self::Info => "INFO",
+        }
+    }
+
+    pub fn matches(self, level: &tracing::Level) -> bool {
+        match self {
+            Self::All => true,
+            Self::Error => *level == tracing::Level::ERROR,
+            Self::Warn => *level == tracing::Level::WARN,
+            Self::Info => *level == tracing::Level::INFO,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ActionOutcome {
     pub force_refresh: bool,
@@ -107,6 +146,8 @@ pub struct DataSnapshot {
     pub correlated: Vec<CorrelatedEvent>,
     /// Per-project health scores (name, 0-100).
     pub health_scores: Vec<(String, u8)>,
+    /// Per-project health breakdowns with per-platform scores and weights.
+    pub health_breakdowns: Vec<(String, HealthBreakdown)>,
     /// Per-project score history for sparklines (name, last N scores).
     pub health_history: Vec<(String, Vec<u8>)>,
     /// Warnings from platform fetches.
@@ -130,6 +171,7 @@ impl Default for DataSnapshot {
             events: Vec::new(),
             correlated: Vec::new(),
             health_scores: Vec::new(),
+            health_breakdowns: Vec::new(),
             health_history: Vec::new(),
             warnings: Vec::new(),
             platform_health: Vec::new(),
@@ -182,6 +224,8 @@ pub struct App {
     pub onboarding: OnboardingState,
     /// Captured tracing log entries for the Logs tab.
     pub log_buffer: LogRingBuffer,
+    /// Active log level filter for the Logs tab.
+    pub log_filter: LogFilter,
 }
 
 impl App {
@@ -213,6 +257,7 @@ impl App {
             pending_action: None,
             onboarding: OnboardingState::default(),
             log_buffer,
+            log_filter: LogFilter::All,
         }
     }
 
@@ -223,7 +268,17 @@ impl App {
             Tab::Platform => self.data.events.len(),
             Tab::Health => self.data.health_scores.len(),
             Tab::Settings => self.data.platform_health.len(),
-            Tab::Logs => self.log_buffer.len(),
+            Tab::Logs => {
+                if self.log_filter == LogFilter::All {
+                    self.log_buffer.len()
+                } else {
+                    self.log_buffer
+                        .snapshot()
+                        .iter()
+                        .filter(|e| self.log_filter.matches(&e.level))
+                        .count()
+                }
+            }
         }
     }
 
@@ -469,6 +524,7 @@ mod tests {
         assert!(snap.events.is_empty());
         assert!(snap.correlated.is_empty());
         assert!(snap.health_scores.is_empty());
+        assert!(snap.health_breakdowns.is_empty());
         assert!(snap.warnings.is_empty());
     }
 }

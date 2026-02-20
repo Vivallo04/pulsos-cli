@@ -90,7 +90,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     )
     .header(header)
     .block(Block::default().borders(Borders::NONE))
-    .row_highlight_style(theme.selected_row());
+    .row_highlight_style(theme.selected_row())
+    .highlight_symbol("▶ ");
 
     let mut state = TableState::default();
     state.select(Some(

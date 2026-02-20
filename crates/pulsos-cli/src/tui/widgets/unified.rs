@@ -12,10 +12,15 @@ use ratatui::{
 use crate::output::table::{format_age, format_duration};
 use crate::tui::app::App;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::status_spans;
+use crate::tui::widgets::{draw_search_bar, split_search_bar, status_spans};
 
 /// Draw the Unified Overview table.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let (search_area, area) = split_search_bar(area, app);
+    if let Some(sa) = search_area {
+        draw_search_bar(frame, sa, app, theme);
+    }
+
     // Header row (T4: bold + fg.subtle)
     let header_cells = [
         "Project", "SHA", "Message", "GitHub CI", "Railway", "Vercel", "Branch", "Age",
@@ -154,11 +159,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::NONE))
-        .row_highlight_style(theme.selected_row());
+        .row_highlight_style(theme.selected_row())
+        .highlight_symbol("▶ ");
 
     let mut table_state = TableState::default();
     if !app.data.correlated.is_empty() {
-        table_state.select(Some(app.selected_row));
+        let selected = app.selected_row.min(app.data.correlated.len().saturating_sub(1));
+        table_state.select(Some(selected));
     }
 
     frame.render_stateful_widget(table, area, &mut table_state);

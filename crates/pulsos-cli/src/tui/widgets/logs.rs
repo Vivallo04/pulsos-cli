@@ -1,22 +1,28 @@
-//! Tab 5: Logs — scrollable list of captured tracing log entries.
+//! Tab 5: Logs — filter bar + scrollable table of captured tracing log entries.
 //!
-//! Each line: `HH:MM:SS  LEVEL  message`
+//! Layout: filter bar (1 row) + log table.
 //! Level coloring: ERROR=failure(red), WARN=warning(yellow),
 //! INFO=active(blue), DEBUG/TRACE=muted.
 
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
 use tracing::Level;
 
-use crate::tui::app::App;
+use crate::tui::app::{App, LogFilter};
 use crate::tui::theme::Theme;
+use crate::tui::widgets::{draw_search_bar, split_search_bar};
 
 /// Draw the Logs tab.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let (search_area, area) = split_search_bar(area, app);
+    if let Some(sa) = search_area {
+        draw_search_bar(frame, sa, app, theme);
+    }
+
     let entries = app.log_buffer.snapshot();
 
     if entries.is_empty() {
@@ -26,61 +32,121 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         return;
     }
 
-    let visible_height = area.height as usize;
-    let total = entries.len();
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).split(area);
 
-    // Auto-scroll: if selected_row is at or near the end, show the tail.
-    // Otherwise respect the user's scroll position.
-    let start = if app.selected_row >= total.saturating_sub(1) {
-        // Auto-scroll to bottom
-        total.saturating_sub(visible_height)
-    } else if app.selected_row < app.scroll_offset {
-        app.selected_row
-    } else if app.selected_row >= app.scroll_offset + visible_height {
-        app.selected_row.saturating_sub(visible_height - 1)
-    } else {
-        app.scroll_offset
-    };
+    // Row 0: Filter bar
+    draw_filter_bar(frame, chunks[0], app, &entries, theme);
 
-    let lines: Vec<Line> = entries
+    // Row 1: Log table
+    let filtered: Vec<_> = entries
         .iter()
-        .skip(start)
-        .take(visible_height)
-        .enumerate()
-        .map(|(i, entry)| {
-            let global_idx = start + i;
-            let is_selected = global_idx == app.selected_row;
+        .filter(|e| app.log_filter.matches(&e.level))
+        .collect();
 
+    if filtered.is_empty() {
+        let msg = Paragraph::new("No entries match the active filter.").style(theme.t8());
+        frame.render_widget(msg, chunks[1]);
+        return;
+    }
+
+    let header_cells = ["Time", "Level", "Target", "Message"]
+        .iter()
+        .map(|h| Cell::from(*h).style(theme.t4()));
+    let header = Row::new(header_cells).height(1);
+
+    let rows: Vec<Row> = filtered
+        .iter()
+        .map(|entry| {
             let time = entry.timestamp.format("%H:%M:%S").to_string();
             let (level_str, level_style) = level_badge(&entry.level, theme);
+            let target = shorten_target(&entry.target);
 
-            let mut spans = vec![
-                Span::styled(time, theme.t8()),
-                Span::raw("  "),
-                Span::styled(level_str, level_style),
-                Span::raw("  "),
-            ];
-
-            let msg_style = if is_selected {
-                theme.selected_row().patch(theme.t6())
-            } else {
-                theme.t6()
-            };
-            spans.push(Span::styled(entry.message.clone(), msg_style));
-
-            if is_selected {
-                Line::from(spans).style(theme.selected_row())
-            } else {
-                Line::from(spans)
-            }
+            Row::new(vec![
+                Cell::from(Span::styled(time, theme.t8())),
+                Cell::from(Span::styled(level_str, level_style)),
+                Cell::from(Span::styled(target, theme.t7())),
+                Cell::from(Span::styled(entry.message.clone(), theme.t6())),
+            ])
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines).block(Block::default().borders(Borders::NONE));
-    frame.render_widget(paragraph, area);
+    let widths = [
+        Constraint::Length(10), // Time
+        Constraint::Length(5),  // Level
+        Constraint::Length(30), // Target
+        Constraint::Min(20),    // Message
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(Block::default().borders(Borders::NONE))
+        .row_highlight_style(theme.selected_row())
+        .highlight_symbol("▶ ");
+
+    let mut table_state = TableState::default();
+    if !filtered.is_empty() {
+        table_state.select(Some(
+            app.selected_row.min(filtered.len().saturating_sub(1)),
+        ));
+    }
+
+    frame.render_stateful_widget(table, chunks[1], &mut table_state);
 }
 
-fn level_badge<'a>(level: &Level, theme: &'a Theme) -> (String, ratatui::style::Style) {
+/// Draw the filter bar: `[ALL] [ERR] [WARN] [INFO]   {n} entries`
+fn draw_filter_bar(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    entries: &[crate::tui::log_buffer::LogEntry],
+    theme: &Theme,
+) {
+    let bar_cols = Layout::horizontal([Constraint::Min(30), Constraint::Length(16)]).split(area);
+
+    let filters = [LogFilter::All, LogFilter::Error, LogFilter::Warn, LogFilter::Info];
+    let mut spans: Vec<Span> = Vec::new();
+
+    for (i, filter) in filters.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
+        let label = format!("[{}]", filter.label());
+        if *filter == app.log_filter {
+            let style = match filter {
+                LogFilter::Error => theme.failure(),
+                LogFilter::Warn => theme.warning(),
+                LogFilter::Info => theme.active(),
+                LogFilter::All => theme.keybind_key(),
+            };
+            spans.push(Span::styled(label, style));
+        } else {
+            spans.push(Span::styled(label, theme.t8()));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), bar_cols[0]);
+
+    let count = entries
+        .iter()
+        .filter(|e| app.log_filter.matches(&e.level))
+        .count();
+    let count_text = format!("{count} entries");
+    let right = Paragraph::new(Line::from(Span::styled(count_text, theme.t8())))
+        .alignment(Alignment::Right);
+    frame.render_widget(right, bar_cols[1]);
+}
+
+/// Shorten a tracing target path by stripping the `pulsos_core::` or `pulsos_cli::` prefix.
+fn shorten_target(target: &str) -> String {
+    for prefix in &["pulsos_core::", "pulsos_cli::"] {
+        if let Some(rest) = target.strip_prefix(prefix) {
+            return rest.to_string();
+        }
+    }
+    target.to_string()
+}
+
+fn level_badge(level: &Level, theme: &Theme) -> (String, ratatui::style::Style) {
     match *level {
         Level::ERROR => ("ERROR".into(), theme.failure()),
         Level::WARN => (" WARN".into(), theme.warning()),
@@ -116,16 +182,19 @@ mod tests {
         log_buffer.push(LogEntry {
             timestamp: Utc::now(),
             level: Level::WARN,
+            target: "pulsos_core::platform::github".into(),
             message: "retry attempt 1 for GitHub".into(),
         });
         log_buffer.push(LogEntry {
             timestamp: Utc::now(),
             level: Level::INFO,
+            target: "pulsos_core::platform::vercel".into(),
             message: "cache hit for vercel-project".into(),
         });
         log_buffer.push(LogEntry {
             timestamp: Utc::now(),
             level: Level::ERROR,
+            target: "pulsos_core::platform::railway".into(),
             message: "connection refused".into(),
         });
         let mut app = App::new(DataSnapshot::default(), TuiConfig::default(), log_buffer);
@@ -152,6 +221,7 @@ mod tests {
         let text = buffer_to_string(&buf);
         assert!(text.contains("retry attempt"), "Should show log message");
         assert!(text.contains("WARN"), "Should show level badge");
+        assert!(text.contains("[ALL]"), "Should show filter bar");
     }
 
     #[test]
@@ -185,6 +255,28 @@ mod tests {
         assert_eq!(level_abbrev(&Level::INFO), "INF");
         assert_eq!(level_abbrev(&Level::DEBUG), "DBG");
         assert_eq!(level_abbrev(&Level::TRACE), "TRC");
+    }
+
+    #[test]
+    fn logs_filter_bar_with_active_filter() {
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let mut app = test_app_with_logs();
+        app.log_filter = LogFilter::Error;
+        app.selected_row = 0;
+        let theme = Theme::dark();
+
+        terminal
+            .draw(|frame| {
+                draw(frame, frame.area(), &app, &theme);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer().clone();
+        let text = buffer_to_string(&buf);
+        assert!(text.contains("[ERR]"), "Should show ERR filter");
+        assert!(text.contains("connection refused"), "Should show ERROR entries");
     }
 
     fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
