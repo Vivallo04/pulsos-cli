@@ -92,6 +92,9 @@ pub struct CorrelatedEvent {
     pub vercel: Option<DeploymentEvent>,
     pub confidence: Confidence,
     pub timestamp: DateTime<Utc>,
+    /// True if any constituent platform event was served from a local cache
+    /// fallback rather than a live API response.
+    pub is_stale: bool,
 }
 
 impl UnifiedProject {

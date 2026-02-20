@@ -87,6 +87,10 @@ pub struct DeploymentEvent {
     pub url: Option<String>,
     /// Platform-specific extra data
     pub metadata: EventMetadata,
+    /// True when this event was served from a local cache fallback rather than
+    /// a live API response. Used to show a staleness indicator in the output.
+    #[serde(default)]
+    pub is_from_cache: bool,
 }
 
 /// Platform-specific metadata that doesn't fit the unified model.

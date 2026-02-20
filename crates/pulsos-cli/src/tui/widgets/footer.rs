@@ -1,45 +1,52 @@
-//! Footer widget — keybinding help, last refresh age, and warning count.
+//! Footer widget — `[key] desc` keybinding badges + refresh age + warnings.
 
 use chrono::Utc;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
 
-use crate::tui::app::{App, InputMode};
+use crate::tui::app::{App, InputMode, Tab};
+use crate::tui::settings_flow::SettingsFlowState;
 use crate::tui::theme::Theme;
+
+mod copy {
+    pub const SETTINGS_IDLE: &str =
+        "[Enter] onboard  [t/T] token  [v] validate  [x] remove  [r] refresh";
+    pub const SETTINGS_PROVIDER_SELECT: &str =
+        "[↑↓] move  [Space] toggle  [Enter] discover  [Esc] cancel";
+    pub const SETTINGS_RESOURCE_SELECT: &str =
+        "[↑↓] move  [Space] toggle  [Enter] preview  [Esc] cancel";
+    pub const SETTINGS_PREVIEW: &str = "[Enter] apply  [Esc] back";
+    pub const SETTINGS_BUSY: &str = "[... ] working";
+    pub const SETTINGS_TOKEN_INPUT: &str = "[Enter] validate+save  [Esc] cancel";
+}
 
 /// Draw the footer bar.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let chunks = Layout::horizontal([Constraint::Min(40), Constraint::Length(30)]).split(area);
+    let chunks = Layout::horizontal([Constraint::Min(36), Constraint::Length(44)]).split(area);
 
     // Left: keybinding help
-    let help_text = match app.input_mode {
-        InputMode::Normal => "j/k:navigate  1-3:tab  q:quit  r:refresh  /:search".to_string(),
-        InputMode::Search => {
-            format!("Search: {}█  (Enter:apply  Esc:cancel)", app.search_query)
-        }
+    let help_line = match app.input_mode {
+        InputMode::Normal => build_normal_help(app, theme),
+        InputMode::Search => build_search_help(app, theme),
     };
-    let help = Paragraph::new(Line::from(Span::styled(
-        help_text,
-        Style::default().fg(theme.muted),
-    )));
-    frame.render_widget(help, chunks[0]);
+    frame.render_widget(Paragraph::new(help_line), chunks[0]);
 
-    // Right: last refresh age + warning count
-    let age = format_refresh_age(app);
-    let mut right_spans = vec![Span::styled(age, Style::default().fg(theme.muted))];
+    // Right: sync state + warning count + latest warning summary
+    let status = format_sync_status(app);
+    let mut right_spans = vec![Span::styled(status, theme.keybind_desc())];
 
     let warning_count = app.data.warnings.len();
     if warning_count > 0 {
         right_spans.push(Span::raw("  "));
-        right_spans.push(Span::styled(
-            format!("⚠ {warning_count}"),
-            Style::default().fg(theme.warning),
-        ));
+        right_spans.push(Span::styled(format!("⚠ {warning_count}"), theme.warning()));
+        if let Some(last) = app.data.warnings.last() {
+            right_spans.push(Span::raw("  "));
+            right_spans.push(Span::styled(truncate(last, 22), theme.t8()));
+        }
     }
 
     let right =
@@ -47,8 +54,68 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_widget(right, chunks[1]);
 }
 
-fn format_refresh_age(app: &App) -> String {
-    let diff = Utc::now() - app.data.fetched_at;
+/// Normal-mode keybinding line: `[key] desc` pairs.
+fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
+    if app.active_tab == Tab::Settings {
+        return Line::from(Span::styled(
+            settings_help_text(app.settings_flow).to_string(),
+            theme.keybind_desc(),
+        ));
+    }
+
+    let entries = [
+        ("[q]", "quit"),
+        ("[Tab]", "switch tab (1-4)"),
+        ("[↵]", "select"),
+        ("[/]", "search"),
+        ("[r]", "refresh"),
+    ];
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, (key, desc)) in entries.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  ", theme.keybind_desc()));
+        }
+        spans.push(Span::styled(*key, theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled(*desc, theme.keybind_desc()));
+    }
+    Line::from(spans)
+}
+
+/// Search-mode keybinding line: `[Esc] cancel  [↵] apply  Filter: {query}█`
+fn build_search_help<'a>(app: &'a App, theme: &'a Theme) -> Line<'a> {
+    let entries: &[(&str, &str)] = &[("[Esc]", "cancel"), ("[↵]", "apply")];
+
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    for (i, (key, desc)) in entries.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  ", theme.keybind_desc()));
+        }
+        spans.push(Span::styled(*key, theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled(*desc, theme.keybind_desc()));
+    }
+    spans.push(Span::styled("  Filter: ", theme.keybind_desc()));
+    spans.push(Span::styled(app.search_query.as_str(), theme.t5()));
+    spans.push(Span::styled("█", theme.keybind_key()));
+    Line::from(spans)
+}
+
+fn spinner_frame(app: &App) -> &'static str {
+    const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let elapsed_ms = (Utc::now() - app.data.last_cycle_started_at)
+        .num_milliseconds()
+        .max(0);
+    let idx = ((elapsed_ms / 80) as usize) % FRAMES.len();
+    FRAMES[idx]
+}
+
+fn format_sync_status(app: &App) -> String {
+    if app.data.is_syncing {
+        return format!("{} syncing", spinner_frame(app));
+    }
+
+    let diff = Utc::now() - app.data.last_cycle_completed_at;
     let secs = diff.num_seconds();
     if secs < 5 {
         "just now".into()
@@ -61,14 +128,38 @@ fn format_refresh_age(app: &App) -> String {
     }
 }
 
-/// Render footer to a buffer for testing.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
+fn settings_help_text(flow: SettingsFlowState) -> &'static str {
+    match flow {
+        SettingsFlowState::ProviderActions => copy::SETTINGS_PROVIDER_SELECT,
+        SettingsFlowState::ResourceSelection => copy::SETTINGS_RESOURCE_SELECT,
+        SettingsFlowState::CorrelationReview => copy::SETTINGS_PREVIEW,
+        SettingsFlowState::ValidatingToken
+        | SettingsFlowState::DiscoveryScanning
+        | SettingsFlowState::Applying => copy::SETTINGS_BUSY,
+        SettingsFlowState::TokenEntry => copy::SETTINGS_TOKEN_INPUT,
+        SettingsFlowState::Idle | SettingsFlowState::ValidationResult => copy::SETTINGS_IDLE,
+    }
+}
+
+/// Render footer help text as a plain string — used for testing.
 #[cfg(test)]
 pub fn render_help_text(app: &App) -> String {
     match app.input_mode {
-        InputMode::Normal => "j/k:navigate  1-3:tab  q:quit  r:refresh  /:search".to_string(),
-        InputMode::Search => {
-            format!("Search: {}  (Enter:apply  Esc:cancel)", app.search_query)
+        InputMode::Normal if app.active_tab != Tab::Settings => {
+            "[q] quit  [Tab] switch tab (1-4)  [↵] select  [/] search  [r] refresh".to_string()
         }
+        InputMode::Normal => settings_help_text(app.settings_flow).to_string(),
+        InputMode::Search => format!("[Esc] cancel  [↵] apply  Filter: {}█", app.search_query),
     }
 }
 
@@ -86,9 +177,10 @@ mod tests {
     fn footer_shows_normal_mode_help() {
         let app = test_app();
         let text = render_help_text(&app);
-        assert!(text.contains("j/k:navigate"));
-        assert!(text.contains("q:quit"));
-        assert!(text.contains("/:search"));
+        assert!(text.contains("[q]"));
+        assert!(text.contains("quit"));
+        assert!(text.contains("[/]"));
+        assert!(text.contains("search"));
     }
 
     #[test]
@@ -97,22 +189,82 @@ mod tests {
         app.input_mode = InputMode::Search;
         app.search_query = "prod".into();
         let text = render_help_text(&app);
-        assert!(text.contains("Search: prod"));
-        assert!(text.contains("Esc:cancel"));
+        assert!(text.contains("Filter: prod"));
+        assert!(text.contains("cancel"));
+    }
+
+    #[test]
+    fn settings_idle_result_legend_is_terse() {
+        let mut app = test_app();
+        app.active_tab = Tab::Settings;
+        app.settings_flow = SettingsFlowState::Idle;
+        assert_eq!(render_help_text(&app), copy::SETTINGS_IDLE);
+
+        app.settings_flow = SettingsFlowState::ValidationResult;
+        assert_eq!(render_help_text(&app), copy::SETTINGS_IDLE);
+    }
+
+    #[test]
+    fn settings_provider_select_legend() {
+        let mut app = test_app();
+        app.active_tab = Tab::Settings;
+        app.settings_flow = SettingsFlowState::ProviderActions;
+        assert_eq!(render_help_text(&app), copy::SETTINGS_PROVIDER_SELECT);
+    }
+
+    #[test]
+    fn settings_resource_select_legend() {
+        let mut app = test_app();
+        app.active_tab = Tab::Settings;
+        app.settings_flow = SettingsFlowState::ResourceSelection;
+        assert_eq!(render_help_text(&app), copy::SETTINGS_RESOURCE_SELECT);
+    }
+
+    #[test]
+    fn settings_preview_legend() {
+        let mut app = test_app();
+        app.active_tab = Tab::Settings;
+        app.settings_flow = SettingsFlowState::CorrelationReview;
+        assert_eq!(render_help_text(&app), copy::SETTINGS_PREVIEW);
+    }
+
+    #[test]
+    fn settings_busy_legend() {
+        let mut app = test_app();
+        app.active_tab = Tab::Settings;
+        app.settings_flow = SettingsFlowState::Applying;
+        assert_eq!(render_help_text(&app), copy::SETTINGS_BUSY);
     }
 
     #[test]
     fn refresh_age_just_now() {
         let app = test_app();
-        let age = format_refresh_age(&app);
+        let age = format_sync_status(&app);
         assert_eq!(age, "just now");
     }
 
     #[test]
     fn refresh_age_old_data() {
         let mut app = test_app();
-        app.data.fetched_at = Utc::now() - chrono::Duration::seconds(120);
-        let age = format_refresh_age(&app);
+        let old = Utc::now() - chrono::Duration::seconds(120);
+        app.data.fetched_at = old;
+        app.data.last_cycle_completed_at = old;
+        let age = format_sync_status(&app);
         assert_eq!(age, "2m ago");
+    }
+
+    #[test]
+    fn sync_status_shows_spinner_when_syncing() {
+        let mut app = test_app();
+        app.data.is_syncing = true;
+        let status = format_sync_status(&app);
+        assert!(status.contains("syncing"));
+    }
+
+    #[test]
+    fn truncate_latest_warning_summary() {
+        let msg = truncate("this is a very long warning message", 10);
+        assert_eq!(msg.chars().count(), 10);
+        assert!(msg.ends_with('…'));
     }
 }

@@ -6,17 +6,18 @@
 //! - Vercel: deploy_target + preview_url
 
 use ratatui::{
-    layout::{Constraint, Rect},
-    style::{Modifier, Style},
-    text::Span,
+    layout::Constraint,
+    layout::Rect,
+    text::{Line, Span},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
 };
 
-use crate::output::table::{format_age, format_duration, status_indicator};
+use crate::output::table::{format_age, format_duration};
 use crate::tui::app::App;
 use crate::tui::theme::Theme;
-use pulsos_core::domain::deployment::{DeploymentEvent, DeploymentStatus, Platform};
+use crate::tui::widgets::status_spans;
+use pulsos_core::domain::deployment::{DeploymentEvent, Platform};
 
 /// Draw the Platform Details table.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -24,7 +25,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         "Status", "Platform", "Title", "Detail", "Actor", "Age", "Dur",
     ]
     .iter()
-    .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD).fg(theme.fg)));
+    .map(|h| Cell::from(*h).style(theme.t4()));
     let header = Row::new(header_cells).height(1);
 
     // Apply search filter if active
@@ -62,16 +63,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .map(|(i, event)| {
             let is_selected = i == app.selected_row;
             let row_style = if is_selected {
-                theme.highlight
+                theme.selected_row()
             } else {
-                Style::default()
+                ratatui::style::Style::default()
             };
 
-            let status_text = status_indicator(&event.status);
-            let status_fg = status_color(&event.status, theme);
+            // Status badge
+            let (sym, label, style) = status_spans(&event.status, theme);
+            let status_cell = Cell::from(Line::from(vec![
+                Span::styled(sym, style),
+                Span::styled(label, style),
+            ]));
 
+            // Platform name — T6 (fg.default), no per-platform coloring
             let platform_text = event.platform.to_string();
-            let platform_fg = platform_color(&event.platform, theme);
+            let platform_cell = Cell::from(Span::styled(platform_text, theme.t6()));
 
             let title = event
                 .title
@@ -79,7 +85,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 .unwrap_or_else(|| &event.id[..event.id.len().min(12)]);
 
             let detail = platform_detail(event);
-
             let actor = event.actor.as_deref().unwrap_or("-");
             let age = format_age(event.created_at);
             let duration = event
@@ -88,23 +93,20 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 .unwrap_or_else(|| "-".into());
 
             Row::new(vec![
-                Cell::from(Span::styled(status_text, Style::default().fg(status_fg))),
-                Cell::from(Span::styled(
-                    platform_text,
-                    Style::default().fg(platform_fg),
-                )),
-                Cell::from(Span::raw(title.to_string())),
-                Cell::from(Span::raw(detail)),
-                Cell::from(Span::raw(actor.to_string())),
-                Cell::from(Span::raw(age)),
-                Cell::from(Span::raw(duration)),
+                status_cell,
+                platform_cell,
+                Cell::from(Span::styled(title.to_string(), theme.t6())),
+                Cell::from(Span::styled(detail, theme.t7())),
+                Cell::from(Span::styled(actor.to_string(), theme.t6())),
+                Cell::from(Span::styled(age, theme.t8())),
+                Cell::from(Span::styled(duration, theme.t8())),
             ])
             .style(row_style)
         })
         .collect();
 
     let widths = [
-        Constraint::Length(8),  // Status
+        Constraint::Length(12), // Status
         Constraint::Length(9),  // Platform
         Constraint::Length(16), // Title
         Constraint::Length(20), // Detail
@@ -116,7 +118,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::NONE))
-        .row_highlight_style(theme.highlight);
+        .row_highlight_style(theme.selected_row());
 
     let mut table_state = TableState::default();
     if !filtered_events.is_empty() {
@@ -168,27 +170,6 @@ fn platform_detail(event: &DeploymentEvent) -> String {
     }
 }
 
-fn status_color(status: &DeploymentStatus, theme: &Theme) -> ratatui::style::Color {
-    match status {
-        DeploymentStatus::Success => theme.success,
-        DeploymentStatus::Failed => theme.failure,
-        DeploymentStatus::InProgress => theme.in_progress,
-        DeploymentStatus::Queued => theme.queued,
-        DeploymentStatus::Cancelled | DeploymentStatus::Skipped => theme.muted,
-        DeploymentStatus::ActionRequired => theme.warning,
-        DeploymentStatus::Sleeping => theme.muted,
-        DeploymentStatus::Unknown(_) => theme.muted,
-    }
-}
-
-fn platform_color(platform: &Platform, theme: &Theme) -> ratatui::style::Color {
-    match platform {
-        Platform::GitHub => theme.github,
-        Platform::Railway => theme.railway,
-        Platform::Vercel => theme.vercel,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +201,7 @@ mod tests {
                     trigger_event: Some("push".into()),
                     ..Default::default()
                 },
+                is_from_cache: false,
             },
             DeploymentEvent {
                 id: "rw-1".into(),
@@ -238,6 +220,7 @@ mod tests {
                     environment_name: Some("production".into()),
                     ..Default::default()
                 },
+                is_from_cache: false,
             },
             DeploymentEvent {
                 id: "vc-1".into(),
@@ -255,6 +238,7 @@ mod tests {
                     deploy_target: Some("production".into()),
                     ..Default::default()
                 },
+                is_from_cache: false,
             },
         ]
     }
@@ -302,6 +286,7 @@ mod tests {
                 trigger_event: Some("push".into()),
                 ..Default::default()
             },
+            is_from_cache: false,
         };
         assert_eq!(platform_detail(&event), "CI (push)");
     }
@@ -325,6 +310,7 @@ mod tests {
                 environment_name: Some("prod".into()),
                 ..Default::default()
             },
+            is_from_cache: false,
         };
         assert_eq!(platform_detail(&event), "api / prod");
     }
@@ -348,6 +334,7 @@ mod tests {
                 preview_url: Some("abc.vercel.app".into()),
                 ..Default::default()
             },
+            is_from_cache: false,
         };
         assert_eq!(platform_detail(&event), "production → abc.vercel.app");
     }

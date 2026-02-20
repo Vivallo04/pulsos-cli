@@ -1,7 +1,8 @@
 use crate::output::{self, OutputFormat};
+use crate::commands::ui::screen::{screen_confirm, PromptResult, ScreenSession, ScreenSpec};
 use anyhow::Result;
 use clap::Args;
-use pulsos_core::auth::credential_store::KeyringStore;
+use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
 use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
@@ -17,6 +18,8 @@ use pulsos_core::platform::{PlatformAdapter, TrackedResource};
 use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::Arc;
+
+use super::wizard::{needs_wizard_prompt, run_config_wizard};
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
@@ -38,6 +41,43 @@ pub struct StatusArgs {
     /// Live-updating TUI mode
     #[arg(long)]
     pub watch: bool,
+
+    /// Force one-shot output (disable auto-live mode)
+    #[arg(long, conflicts_with = "watch")]
+    pub once: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunMode {
+    Live,
+    Once,
+}
+
+fn resolve_run_mode(
+    args: &StatusArgs,
+    format: OutputFormat,
+    stdout_is_tty: bool,
+) -> Result<RunMode> {
+    if args.watch {
+        if !stdout_is_tty {
+            anyhow::bail!("`--watch` requires an interactive terminal (TTY).");
+        }
+        return Ok(RunMode::Live);
+    }
+
+    if args.once {
+        return Ok(RunMode::Once);
+    }
+
+    if !stdout_is_tty {
+        return Ok(RunMode::Once);
+    }
+
+    if !matches!(format, OutputFormat::Table) {
+        return Ok(RunMode::Once);
+    }
+
+    Ok(RunMode::Live)
 }
 
 pub async fn execute(
@@ -46,30 +86,18 @@ pub async fn execute(
     _no_color: bool,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    let config = match load_config(config_path) {
+    let stdout_is_tty = std::io::stdout().is_terminal();
+
+    let mut config = match load_config(config_path) {
         Ok(c) => c,
         Err(PulsosError::NoConfig) => {
-            if std::io::stdout().is_terminal() {
-                eprintln!("No configuration found.\n");
-                let run_sync = dialoguer::Confirm::new()
-                    .with_prompt("Would you like to discover and track your projects now?")
-                    .default(true)
-                    .interact()
-                    .unwrap_or(false);
-
-                if run_sync {
-                    let sync_args = super::repos::ReposArgs { command: None };
-                    super::repos::execute(sync_args, config_path).await?;
-
-                    // Re-load the config that repos sync just saved.
-                    load_config(config_path).map_err(|_| {
-                        anyhow::anyhow!(
-                            "Sync completed but no config was saved. Run `pulsos repos sync` manually."
-                        )
-                    })?
-                } else {
-                    anyhow::bail!("Run `pulsos repos sync` to discover and track your projects.");
-                }
+            if stdout_is_tty {
+                run_config_wizard(config_path).await?;
+                load_config(config_path).map_err(|_| {
+                    anyhow::anyhow!(
+                        "Wizard completed but no config was saved. Run `pulsos repos sync` manually."
+                    )
+                })?
             } else {
                 anyhow::bail!(
                     "No configuration found. Run `pulsos repos sync` to discover and track your projects."
@@ -81,8 +109,45 @@ pub async fn execute(
         }
     };
 
-    let cache = Arc::new(CacheStore::open_default()?);
-    let store = Arc::new(KeyringStore::new());
+    if stdout_is_tty && needs_wizard_prompt(&config).await.unwrap_or(false) {
+        let session = ScreenSession::new();
+        let spec = ScreenSpec::new("Setup Check")
+            .body_lines([
+                "Some platform checks are incomplete.",
+                "Run setup wizard now to validate and fix configuration?",
+            ]);
+        let should_run = match screen_confirm(
+            &session,
+            &spec,
+            "Run setup wizard now?",
+            true,
+        ) {
+            Ok(PromptResult {
+                cancelled: true, ..
+            }) => false,
+            Ok(PromptResult {
+                value: Some(value), ..
+            }) => value,
+            _ => false,
+        };
+
+        if should_run {
+            run_config_wizard(config_path).await?;
+            config = load_config(config_path).map_err(|_| {
+                anyhow::anyhow!(
+                    "Wizard completed but no config was saved. Run `pulsos repos sync` manually."
+                )
+            })?;
+        }
+    }
+
+    let run_mode = resolve_run_mode(&args, format, stdout_is_tty)?;
+    if run_mode == RunMode::Live {
+        return crate::tui::run_tui(config, config_path.map(|p| p.to_path_buf())).await;
+    }
+
+    let cache = Arc::new(CacheStore::open_or_temporary());
+    let store: Arc<dyn CredentialStore> = Arc::new(FallbackStore::new()?);
     let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
 
     let mut all_events: Vec<DeploymentEvent> = Vec::new();
@@ -139,8 +204,6 @@ pub async fn execute(
         true
     };
 
-    // Build tracked resources from correlations config.
-    // Each correlation binds a github_repo, railway_project, and vercel_project.
     let mut github_tracked: Vec<TrackedResource> = Vec::new();
     let mut railway_tracked: Vec<TrackedResource> = Vec::new();
     let mut vercel_tracked: Vec<TrackedResource> = Vec::new();
@@ -158,8 +221,6 @@ pub async fn execute(
             });
         }
         if let Some(ref project) = corr.railway_project {
-            // Railway platform_id is "projectId:serviceId:environmentId"
-            // For now, treat the correlation value as a composite key
             railway_tracked.push(TrackedResource {
                 platform_id: project.clone(),
                 display_name: corr.name.clone(),
@@ -229,28 +290,20 @@ pub async fn execute(
     // Sort by created_at descending
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    // Watch mode — launch the live TUI dashboard.
-    if args.watch {
-        return crate::tui::run_tui(config).await;
-    }
-
-    // Correlate events across platforms.
     let correlated = correlation::correlate_all(&config.correlations, &all_events);
-
-    // Compute per-project health scores (0–100).
     let health_scores = health::compute_project_health_scores(&config.correlations, &all_events);
 
-    // Output
     match format {
         OutputFormat::Table => {
             output::table::render_correlated(&correlated);
             output::table::render_health_scores(&health_scores);
         }
-        OutputFormat::Json => output::json::render_correlated_with_health(&correlated, &health_scores)?,
+        OutputFormat::Json => {
+            output::json::render_correlated_with_health(&correlated, &health_scores)?
+        }
         OutputFormat::Compact => output::compact::render_correlated(&correlated),
     }
 
-    // Show warnings
     if !warnings.is_empty() {
         eprintln!();
         for w in &warnings {
@@ -259,4 +312,68 @@ pub async fn execute(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_args() -> StatusArgs {
+        StatusArgs {
+            project: None,
+            platform: None,
+            view: None,
+            branch: None,
+            watch: false,
+            once: false,
+        }
+    }
+
+    #[test]
+    fn tty_table_defaults_to_live() {
+        let args = base_args();
+        let mode = resolve_run_mode(&args, OutputFormat::Table, true).unwrap();
+        assert_eq!(mode, RunMode::Live);
+    }
+
+    #[test]
+    fn tty_table_once_forces_one_shot() {
+        let mut args = base_args();
+        args.once = true;
+        let mode = resolve_run_mode(&args, OutputFormat::Table, true).unwrap();
+        assert_eq!(mode, RunMode::Once);
+    }
+
+    #[test]
+    fn watch_forces_live_on_tty() {
+        let mut args = base_args();
+        args.watch = true;
+        let mode = resolve_run_mode(&args, OutputFormat::Table, true).unwrap();
+        assert_eq!(mode, RunMode::Live);
+    }
+
+    #[test]
+    fn non_tty_defaults_to_one_shot() {
+        let args = base_args();
+        let mode = resolve_run_mode(&args, OutputFormat::Table, false).unwrap();
+        assert_eq!(mode, RunMode::Once);
+    }
+
+    #[test]
+    fn non_table_formats_are_one_shot() {
+        let args = base_args();
+        let json_mode = resolve_run_mode(&args, OutputFormat::Json, true).unwrap();
+        let compact_mode = resolve_run_mode(&args, OutputFormat::Compact, true).unwrap();
+        assert_eq!(json_mode, RunMode::Once);
+        assert_eq!(compact_mode, RunMode::Once);
+    }
+
+    #[test]
+    fn watch_without_tty_errors() {
+        let mut args = base_args();
+        args.watch = true;
+        let err = resolve_run_mode(&args, OutputFormat::Table, false)
+            .expect_err("watch without tty should fail");
+        assert!(err.to_string().contains("interactive terminal"));
+    }
 }

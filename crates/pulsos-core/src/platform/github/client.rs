@@ -5,12 +5,16 @@ use crate::platform::{
     AuthStatus, DiscoveredResource, PlatformAdapter, RateLimitInfo, TrackedResource,
 };
 use chrono::{DateTime, Utc};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, ETAG, IF_NONE_MATCH};
 use secrecy::{ExposeSecret, SecretString};
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
-use super::types::{GhRateLimit, GhRepo, GhUser, WorkflowRun, WorkflowRunsResponse};
+use super::types::{
+    GhCollaboratorPermission, GhOrg, GhRateLimit, GhRepo, GhUser, WorkflowRun, WorkflowRunsResponse,
+};
 
 pub struct GitHubClient {
     client: reqwest::Client,
@@ -32,6 +36,8 @@ impl GitHubClient {
     ) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("Failed to build HTTP client");
 
@@ -92,13 +98,47 @@ impl GitHubClient {
         }
     }
 
+    /// Returns `true` when the remaining GitHub API budget is below 10%.
+    /// When the budget is unknown (no previous request has been made), returns `false`.
+    async fn is_rate_limit_low(&self) -> bool {
+        let rl = self.rate_limit.read().await;
+        match rl.as_ref() {
+            Some(rl) if rl.limit > 0 => (rl.remaining as f32 / rl.limit as f32) < 0.10,
+            _ => false,
+        }
+    }
+
     async fn fetch_workflow_runs(&self, repo: &str) -> Result<Vec<WorkflowRun>, PulsosError> {
         let url = format!("{}/repos/{}/actions/runs?per_page=5", self.base_url, repo);
+        let cache_key = crate::cache::keys::github_runs_key(repo);
+
+        // Serve from cache immediately when rate-limit budget is critically low.
+        if self.is_rate_limit_low().await {
+            if let Ok(Some(cached)) = self.cache.get::<Vec<WorkflowRun>>(&cache_key) {
+                tracing::warn!(repo = %repo, "GitHub rate limit < 10%, serving from cache");
+                return Ok(cached.data);
+            }
+        }
+
+        // Read cached ETag to send as If-None-Match
+        let cached_etag = self
+            .cache
+            .get::<Vec<WorkflowRun>>(&cache_key)
+            .ok()
+            .flatten()
+            .and_then(|e| e.etag);
+
+        let mut headers = self.auth_headers()?;
+        if let Some(ref etag) = cached_etag {
+            if let Ok(val) = HeaderValue::from_str(etag) {
+                headers.insert(IF_NONE_MATCH, val);
+            }
+        }
 
         let resp = self
             .client
             .get(&url)
-            .headers(self.auth_headers()?)
+            .headers(headers)
             .send()
             .await
             .map_err(|e| PulsosError::Network {
@@ -110,6 +150,20 @@ impl GitHubClient {
         self.update_rate_limit(&resp).await;
 
         let status = resp.status();
+
+        // 304 Not Modified — data unchanged, serve from cache
+        if status == reqwest::StatusCode::NOT_MODIFIED {
+            if let Ok(Some(cached)) = self.cache.get::<Vec<WorkflowRun>>(&cache_key) {
+                return Ok(cached.data);
+            }
+            // Cache miss despite 304 — treat as a fresh fetch error
+            return Err(PulsosError::ApiError {
+                platform: "GitHub".into(),
+                status: 304,
+                body: "304 Not Modified but no cached data available".into(),
+            });
+        }
+
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(PulsosError::AuthFailed {
                 platform: "GitHub".into(),
@@ -137,16 +191,111 @@ impl GitHubClient {
             });
         }
 
+        // Extract ETag before consuming the response body
+        let new_etag = resp
+            .headers()
+            .get(ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+
         let body: WorkflowRunsResponse =
             resp.json().await.map_err(|e| PulsosError::ParseError {
                 platform: "GitHub".into(),
                 message: e.to_string(),
             })?;
 
+        // Cache the fresh result with its ETag
+        let _ = self
+            .cache
+            .set(&cache_key, &body.workflow_runs, 30, new_etag);
+
         Ok(body.workflow_runs)
     }
 
-    fn run_to_event(run: &WorkflowRun, _repo: &str) -> DeploymentEvent {
+    /// Returns the login name of the authenticated user.
+    pub async fn fetch_user_login(&self) -> Result<String, PulsosError> {
+        let url = format!("{}/user", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| PulsosError::Network {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+                source: Some(e),
+            })?;
+
+        self.update_rate_limit(&resp).await;
+
+        if !resp.status().is_success() {
+            return Err(PulsosError::AuthFailed {
+                platform: "GitHub".into(),
+                reason: format!("HTTP {}", resp.status()),
+            });
+        }
+
+        let user: GhUser = resp.json().await.map_err(|e| PulsosError::ParseError {
+            platform: "GitHub".into(),
+            message: e.to_string(),
+        })?;
+
+        Ok(user.login)
+    }
+
+    /// Checks the permission level of `user` on `owner/repo`.
+    /// Returns the permission string: "admin", "write", "read", or "none".
+    pub async fn check_repo_permission(
+        &self,
+        owner: &str,
+        repo: &str,
+        user: &str,
+    ) -> Result<String, PulsosError> {
+        let url = format!(
+            "{}/repos/{}/{}/collaborators/{}/permission",
+            self.base_url, owner, repo, user
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| PulsosError::Network {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+                source: Some(e),
+            })?;
+
+        self.update_rate_limit(&resp).await;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(PulsosError::AuthFailed {
+                platform: "GitHub".into(),
+                reason: format!("HTTP {status}"),
+            });
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(PulsosError::ApiError {
+                platform: "GitHub".into(),
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let perm: GhCollaboratorPermission =
+            resp.json().await.map_err(|e| PulsosError::ParseError {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+            })?;
+
+        Ok(perm.permission)
+    }
+
+    fn run_to_event(run: &WorkflowRun, _repo: &str, is_from_cache: bool) -> DeploymentEvent {
         let duration = match (run.run_started_at, run.updated_at) {
             (Some(start), end) => {
                 let diff = end - start;
@@ -172,6 +321,7 @@ impl GitHubClient {
                 trigger_event: Some(run.event.clone()),
                 ..Default::default()
             },
+            is_from_cache,
         }
     }
 }
@@ -186,12 +336,8 @@ impl PlatformAdapter for GitHubClient {
         for resource in tracked {
             match self.fetch_workflow_runs(&resource.platform_id).await {
                 Ok(runs) => {
-                    // Cache the results
-                    let cache_key = crate::cache::keys::github_runs_key(&resource.platform_id);
-                    let _ = self.cache.set(&cache_key, &runs, 30, None);
-
                     for run in &runs {
-                        all_events.push(Self::run_to_event(run, &resource.platform_id));
+                        all_events.push(Self::run_to_event(run, &resource.platform_id, false));
                     }
                 }
                 Err(e) => {
@@ -204,7 +350,7 @@ impl PlatformAdapter for GitHubClient {
                     let cache_key = crate::cache::keys::github_runs_key(&resource.platform_id);
                     if let Ok(Some(cached)) = self.cache.get::<Vec<WorkflowRun>>(&cache_key) {
                         for run in &cached.data {
-                            all_events.push(Self::run_to_event(run, &resource.platform_id));
+                            all_events.push(Self::run_to_event(run, &resource.platform_id, true));
                         }
                     }
                 }
@@ -218,8 +364,9 @@ impl PlatformAdapter for GitHubClient {
 
     async fn discover(&self) -> Result<Vec<DiscoveredResource>, PulsosError> {
         let mut resources = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
 
-        // Fetch user's repos
+        // Fetch user's own repos
         let url = format!("{}/user/repos?per_page=100&type=owner", self.base_url);
         let resp = self
             .client
@@ -251,12 +398,12 @@ impl PlatformAdapter for GitHubClient {
         })?;
 
         for repo in repos {
+            seen.insert(repo.full_name.clone());
             let group_type = if repo.owner.owner_type.eq_ignore_ascii_case("organization") {
                 "organization"
             } else {
                 "user"
             };
-
             resources.push(DiscoveredResource {
                 platform_id: repo.full_name.clone(),
                 display_name: repo.name,
@@ -265,6 +412,84 @@ impl PlatformAdapter for GitHubClient {
                 archived: repo.archived,
                 disabled: repo.disabled,
             });
+        }
+
+        // Fetch orgs and discover repos in each org namespace
+        let orgs_url = format!("{}/user/orgs?per_page=100", self.base_url);
+        let orgs_resp = self
+            .client
+            .get(&orgs_url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| PulsosError::Network {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+                source: Some(e),
+            })?;
+
+        self.update_rate_limit(&orgs_resp).await;
+
+        let orgs_status = orgs_resp.status();
+        if orgs_status.is_success() {
+            let orgs: Vec<GhOrg> = orgs_resp.json().await.unwrap_or_default();
+
+            for org in orgs {
+                let org_repos_url = format!(
+                    "{}/orgs/{}/repos?per_page=100&type=all",
+                    self.base_url, org.login
+                );
+                match self
+                    .client
+                    .get(&org_repos_url)
+                    .headers(self.auth_headers()?)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        self.update_rate_limit(&resp).await;
+                        let repo_status = resp.status();
+                        if repo_status.is_success() {
+                            match resp.json::<Vec<GhRepo>>().await {
+                                Ok(org_repos) => {
+                                    for repo in org_repos {
+                                        if seen.insert(repo.full_name.clone()) {
+                                            resources.push(DiscoveredResource {
+                                                platform_id: repo.full_name.clone(),
+                                                display_name: repo.name,
+                                                group: repo.owner.login,
+                                                group_type: "organization".into(),
+                                                archived: repo.archived,
+                                                disabled: repo.disabled,
+                                            });
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(org = %org.login, error = %e, "Failed to parse org repos");
+                                }
+                            }
+                        } else if repo_status == reqwest::StatusCode::FORBIDDEN
+                            || repo_status == reqwest::StatusCode::UNAUTHORIZED
+                        {
+                            tracing::warn!(
+                                org = %org.login,
+                                "Insufficient permissions to list org repos (token needs read:org scope)"
+                            );
+                        } else {
+                            tracing::warn!(org = %org.login, status = %repo_status, "Failed to fetch org repos");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(org = %org.login, error = %e, "Network error fetching org repos");
+                    }
+                }
+            }
+        } else {
+            tracing::warn!(
+                status = %orgs_status,
+                "Failed to fetch user orgs (token may need read:org scope)"
+            );
         }
 
         Ok(resources)

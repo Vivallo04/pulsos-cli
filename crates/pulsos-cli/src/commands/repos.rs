@@ -1,11 +1,15 @@
 use anyhow::Result;
+use crate::commands::ui::screen::{
+    screen_confirm, screen_input, screen_multiselect, PromptResult, ScreenSession, ScreenSpec,
+};
 use clap::{Args, Subcommand};
-use pulsos_core::auth::credential_store::KeyringStore;
+use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
 use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
-use pulsos_core::config::types::CorrelationConfig;
+use pulsos_core::config::types::{CorrelationConfig, GroupConfig};
 use pulsos_core::config::{load_config, save_config};
+use pulsos_core::health::{check_all_platforms_health, PlatformHealthState};
 use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::railway::client::RailwayClient;
 use pulsos_core::platform::vercel::client::VercelClient;
@@ -22,6 +26,21 @@ use std::sync::Arc;
 pub struct ReposArgs {
     #[command(subcommand)]
     pub command: Option<ReposCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GroupsCommand {
+    /// List all groups (default)
+    List,
+    /// Create a new group
+    Create {
+        name: String,
+        /// Resources as platform:id (supply after --)
+        #[arg(last = true)]
+        resources: Vec<String>,
+    },
+    /// Delete a group by name
+    Delete { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -45,27 +64,51 @@ pub enum ReposCommand {
         /// Project name to edit (e.g. my-saas)
         name: String,
     },
+    /// Manage named groups of resources
+    Groups {
+        #[command(subcommand)]
+        command: Option<GroupsCommand>,
+    },
+    /// Verify access permissions for all tracked resources
+    Verify,
 }
 
 pub async fn execute(args: ReposArgs, config_path: Option<&Path>) -> Result<()> {
+    execute_with_store(args, config_path, None).await
+}
+
+pub(crate) async fn execute_with_store(
+    args: ReposArgs,
+    config_path: Option<&Path>,
+    store_override: Option<Arc<dyn CredentialStore>>,
+) -> Result<()> {
     match args.command {
-        Some(ReposCommand::Sync) | None => sync_command(config_path).await,
+        Some(ReposCommand::Sync) | None => sync_command(config_path, store_override).await,
         Some(ReposCommand::List) => list_command(config_path),
         Some(ReposCommand::Add { resource }) => add_command(&resource, config_path),
         Some(ReposCommand::Remove { resource }) => remove_command(&resource, config_path),
         Some(ReposCommand::Correlate { name }) => correlate_command(&name, config_path),
+        Some(ReposCommand::Groups { command }) => groups_command(command, config_path),
+        Some(ReposCommand::Verify) => verify_command(config_path).await,
     }
 }
 
-async fn sync_command(config_path: Option<&Path>) -> Result<()> {
+async fn sync_command(
+    config_path: Option<&Path>,
+    store_override: Option<Arc<dyn CredentialStore>>,
+) -> Result<()> {
+    let screen = ScreenSession::new();
     println!("Discovering projects across platforms...");
     println!();
 
     // Load existing config or start fresh.
     let existing_config = load_config(config_path).unwrap_or_default();
 
-    let cache = Arc::new(CacheStore::open_default()?);
-    let store = Arc::new(KeyringStore::new());
+    let cache = Arc::new(CacheStore::open_or_temporary());
+    let store: Arc<dyn CredentialStore> = match store_override {
+        Some(store) => store,
+        None => Arc::new(FallbackStore::new()?),
+    };
     let resolver = TokenResolver::new(store, existing_config.auth.token_detection.clone());
 
     let mut github_resources: Vec<DiscoveredResource> = Vec::new();
@@ -155,12 +198,28 @@ async fn sync_command(config_path: Option<&Path>) -> Result<()> {
             .iter()
             .map(|r| format!("{} ({})", r.display_name, r.group))
             .collect();
-        let defaults: Vec<bool> = vec![true; items.len()];
-        let selections = dialoguer::MultiSelect::new()
-            .with_prompt("Select GitHub repositories to track")
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let defaults: Vec<bool> = vec![false; items.len()];
+        let spec = ScreenSpec::new("GitHub Selection")
+            .step(1, 4)
+            .body_lines([
+                "Select GitHub repositories to track.",
+                "All repositories are disabled by default.",
+            ]);
+        let selections = match screen_multiselect(
+            &screen,
+            &spec,
+            "Select GitHub repositories to track",
+            &items,
+            &defaults,
+        )? {
+            PromptResult {
+                cancelled: true, ..
+            } => return Ok(()),
+            PromptResult {
+                value: Some(value), ..
+            } => value,
+            _ => vec![],
+        };
         github_resources = selections
             .into_iter()
             .map(|i| github_resources[i].clone())
@@ -172,12 +231,28 @@ async fn sync_command(config_path: Option<&Path>) -> Result<()> {
             .iter()
             .map(|r| format!("{} ({})", r.display_name, r.group))
             .collect();
-        let defaults: Vec<bool> = vec![true; items.len()];
-        let selections = dialoguer::MultiSelect::new()
-            .with_prompt("Select Railway services to track")
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let defaults: Vec<bool> = vec![false; items.len()];
+        let spec = ScreenSpec::new("Railway Selection")
+            .step(2, 4)
+            .body_lines([
+                "Select Railway services to track.",
+                "All services are disabled by default.",
+            ]);
+        let selections = match screen_multiselect(
+            &screen,
+            &spec,
+            "Select Railway services to track",
+            &items,
+            &defaults,
+        )? {
+            PromptResult {
+                cancelled: true, ..
+            } => return Ok(()),
+            PromptResult {
+                value: Some(value), ..
+            } => value,
+            _ => vec![],
+        };
         railway_resources = selections
             .into_iter()
             .map(|i| railway_resources[i].clone())
@@ -195,12 +270,28 @@ async fn sync_command(config_path: Option<&Path>) -> Result<()> {
                 format!("{} ({}){}", r.display_name, r.group, linked_str)
             })
             .collect();
-        let defaults: Vec<bool> = vec![true; items.len()];
-        let selections = dialoguer::MultiSelect::new()
-            .with_prompt("Select Vercel projects to track")
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let defaults: Vec<bool> = vec![false; items.len()];
+        let spec = ScreenSpec::new("Vercel Selection")
+            .step(3, 4)
+            .body_lines([
+                "Select Vercel projects to track.",
+                "All projects are disabled by default.",
+            ]);
+        let selections = match screen_multiselect(
+            &screen,
+            &spec,
+            "Select Vercel projects to track",
+            &items,
+            &defaults,
+        )? {
+            PromptResult {
+                cancelled: true, ..
+            } => return Ok(()),
+            PromptResult {
+                value: Some(value), ..
+            } => value,
+            _ => vec![],
+        };
         vercel_resources = selections
             .into_iter()
             .map(|i| vercel_resources[i].clone())
@@ -243,10 +334,23 @@ async fn sync_command(config_path: Option<&Path>) -> Result<()> {
     }
 
     println!();
-    let confirm = dialoguer::Confirm::new()
-        .with_prompt("Accept these correlations?")
-        .default(true)
-        .interact()?;
+    let confirm_spec = ScreenSpec::new("Correlation Review")
+        .step(4, 4)
+        .body_lines(["Review proposed correlations and accept to save config."]);
+    let confirm = match screen_confirm(
+        &screen,
+        &confirm_spec,
+        "Accept these correlations?",
+        true,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => false,
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => false,
+    };
 
     if !confirm {
         println!("Sync cancelled.");
@@ -398,6 +502,7 @@ fn remove_command(resource: &str, config_path: Option<&Path>) -> Result<()> {
 }
 
 fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
+    let screen = ScreenSession::new();
     let mut config = load_config(config_path).map_err(|_| {
         anyhow::anyhow!("No configuration found. Run `pulsos repos sync` to get started.")
     })?;
@@ -411,10 +516,22 @@ fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
     let corr = if let Some(i) = pos {
         config.correlations[i].clone()
     } else {
-        let create = dialoguer::Confirm::new()
-            .with_prompt(format!("Project '{name}' not found. Create it?"))
-            .default(true)
-            .interact()?;
+        let create_spec = ScreenSpec::new("Correlation Setup")
+            .body_lines([format!("Project '{name}' not found.")]);
+        let create = match screen_confirm(
+            &screen,
+            &create_spec,
+            &format!("Create project '{name}'?"),
+            true,
+        )? {
+            PromptResult {
+                cancelled: true, ..
+            } => false,
+            PromptResult {
+                value: Some(value), ..
+            } => value,
+            _ => false,
+        };
         if !create {
             println!("Cancelled.");
             return Ok(());
@@ -437,46 +554,115 @@ fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
 
     // ── GitHub ──
     let gh_current = corr.github_repo.clone().unwrap_or_else(|| "not set".into());
-    println!("  GitHub repo  (current: {gh_current})");
-    let gh_input: String = dialoguer::Input::new()
-        .with_prompt("  New value (e.g. myorg/my-saas)")
-        .allow_empty(true)
-        .with_initial_text(corr.github_repo.as_deref().unwrap_or(""))
-        .interact_text()?;
+    let gh_spec = ScreenSpec::new("Correlation Edit")
+        .step(1, 3)
+        .body_lines([format!("GitHub repo (current: {gh_current})")]);
+    let gh_input: String = match screen_input(
+        &screen,
+        &gh_spec,
+        "New value (e.g. myorg/my-saas)",
+        corr.github_repo.as_deref(),
+        true,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => return Ok(()),
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => String::new(),
+    };
 
     // ── Railway ──
-    let rw_current = corr.railway_project.clone().unwrap_or_else(|| "not set".into());
-    println!("  Railway project  (current: {rw_current})");
-    let rw_input: String = dialoguer::Input::new()
-        .with_prompt("  New value (project ID or name)")
-        .allow_empty(true)
-        .with_initial_text(corr.railway_project.as_deref().unwrap_or(""))
-        .interact_text()?;
+    let rw_current = corr
+        .railway_project
+        .clone()
+        .unwrap_or_else(|| "not set".into());
+    let rw_spec = ScreenSpec::new("Correlation Edit")
+        .step(2, 3)
+        .body_lines([format!("Railway project (current: {rw_current})")]);
+    let rw_input: String = match screen_input(
+        &screen,
+        &rw_spec,
+        "New value (project ID or name)",
+        corr.railway_project.as_deref(),
+        true,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => return Ok(()),
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => String::new(),
+    };
 
-    let rw_ws_current = corr.railway_workspace.clone().unwrap_or_else(|| "not set".into());
-    println!("  Railway workspace  (current: {rw_ws_current})");
-    let rw_ws_input: String = dialoguer::Input::new()
-        .with_prompt("  New value (workspace name)")
-        .allow_empty(true)
-        .with_initial_text(corr.railway_workspace.as_deref().unwrap_or(""))
-        .interact_text()?;
+    let rw_ws_current = corr
+        .railway_workspace
+        .clone()
+        .unwrap_or_else(|| "not set".into());
+    let rw_ws_spec = ScreenSpec::new("Correlation Edit")
+        .step(2, 3)
+        .body_lines([format!("Railway workspace (current: {rw_ws_current})")]);
+    let rw_ws_input: String = match screen_input(
+        &screen,
+        &rw_ws_spec,
+        "New value (workspace name)",
+        corr.railway_workspace.as_deref(),
+        true,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => return Ok(()),
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => String::new(),
+    };
 
     // ── Vercel ──
-    let vc_current = corr.vercel_project.clone().unwrap_or_else(|| "not set".into());
-    println!("  Vercel project  (current: {vc_current})");
-    let vc_input: String = dialoguer::Input::new()
-        .with_prompt("  New value (project ID)")
-        .allow_empty(true)
-        .with_initial_text(corr.vercel_project.as_deref().unwrap_or(""))
-        .interact_text()?;
+    let vc_current = corr
+        .vercel_project
+        .clone()
+        .unwrap_or_else(|| "not set".into());
+    let vc_spec = ScreenSpec::new("Correlation Edit")
+        .step(3, 3)
+        .body_lines([format!("Vercel project (current: {vc_current})")]);
+    let vc_input: String = match screen_input(
+        &screen,
+        &vc_spec,
+        "New value (project ID)",
+        corr.vercel_project.as_deref(),
+        true,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => return Ok(()),
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => String::new(),
+    };
 
     let vc_team_current = corr.vercel_team.clone().unwrap_or_else(|| "not set".into());
-    println!("  Vercel team  (current: {vc_team_current})");
-    let vc_team_input: String = dialoguer::Input::new()
-        .with_prompt("  New value (team name or slug)")
-        .allow_empty(true)
-        .with_initial_text(corr.vercel_team.as_deref().unwrap_or(""))
-        .interact_text()?;
+    let vc_team_spec = ScreenSpec::new("Correlation Edit")
+        .step(3, 3)
+        .body_lines([format!("Vercel team (current: {vc_team_current})")]);
+    let vc_team_input: String = match screen_input(
+        &screen,
+        &vc_team_spec,
+        "New value (team name or slug)",
+        corr.vercel_team.as_deref(),
+        true,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => return Ok(()),
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => String::new(),
+    };
 
     // Build updated correlation.
     let updated = CorrelationConfig {
@@ -512,10 +698,17 @@ fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
     }
 
     println!();
-    let save = dialoguer::Confirm::new()
-        .with_prompt("Save?")
-        .default(true)
-        .interact()?;
+    let save_spec = ScreenSpec::new("Correlation Edit")
+        .body_lines(["Save this correlation update?"]);
+    let save = match screen_confirm(&screen, &save_spec, "Save?", true)? {
+        PromptResult {
+            cancelled: true, ..
+        } => false,
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => false,
+    };
 
     if !save {
         println!("Cancelled. No changes saved.");
@@ -523,7 +716,11 @@ fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
     }
 
     // Upsert into config.
-    match config.correlations.iter_mut().find(|c| c.name.eq_ignore_ascii_case(name)) {
+    match config
+        .correlations
+        .iter_mut()
+        .find(|c| c.name.eq_ignore_ascii_case(name))
+    {
         Some(existing) => *existing = updated,
         None => config.correlations.push(updated),
     }
@@ -570,4 +767,236 @@ fn derive_name(platform: &str, id: &str) -> String {
         }
         _ => id.to_string(),
     }
+}
+
+// ── Groups ──
+
+fn groups_command(cmd: Option<GroupsCommand>, config_path: Option<&Path>) -> Result<()> {
+    match cmd.unwrap_or(GroupsCommand::List) {
+        GroupsCommand::List => groups_list(config_path),
+        GroupsCommand::Create { name, resources } => groups_create(&name, resources, config_path),
+        GroupsCommand::Delete { name } => groups_delete(&name, config_path),
+    }
+}
+
+fn groups_list(config_path: Option<&Path>) -> Result<()> {
+    let config = load_config(config_path).unwrap_or_default();
+
+    if config.groups.is_empty() {
+        println!("No groups configured. Use `pulsos repos groups create <name> -- <resources...>` to add one.");
+        return Ok(());
+    }
+
+    println!("{:<24}  Resources", "Name");
+    println!("{}", "─".repeat(60));
+    for g in &config.groups {
+        let resources = if g.resources.is_empty() {
+            "(empty)".to_string()
+        } else {
+            g.resources.join(", ")
+        };
+        println!("{:<24}  {}", g.name, resources);
+    }
+
+    Ok(())
+}
+
+fn groups_create(name: &str, resources: Vec<String>, config_path: Option<&Path>) -> Result<()> {
+    let mut config = load_config(config_path).unwrap_or_default();
+
+    if config
+        .groups
+        .iter()
+        .any(|g| g.name.eq_ignore_ascii_case(name))
+    {
+        anyhow::bail!("A group named '{name}' already exists.");
+    }
+
+    let count = resources.len();
+    config.groups.push(GroupConfig {
+        name: name.to_string(),
+        resources,
+    });
+
+    save_config(&config, config_path)?;
+    println!("Group '{name}' created with {count} resource(s).");
+    Ok(())
+}
+
+fn groups_delete(name: &str, config_path: Option<&Path>) -> Result<()> {
+    let screen = ScreenSession::new();
+    let mut config =
+        load_config(config_path).map_err(|_| anyhow::anyhow!("No configuration found."))?;
+
+    let pos = config
+        .groups
+        .iter()
+        .position(|g| g.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| anyhow::anyhow!("Group '{name}' not found."))?;
+
+    let confirm_spec = ScreenSpec::new("Delete Group").body_lines([
+        format!("This will remove group '{}'.", config.groups[pos].name),
+        "This action updates your saved config.".to_string(),
+    ]);
+    let confirm = match screen_confirm(
+        &screen,
+        &confirm_spec,
+        &format!("Delete group '{}'?", config.groups[pos].name),
+        false,
+    )? {
+        PromptResult {
+            cancelled: true, ..
+        } => false,
+        PromptResult {
+            value: Some(value), ..
+        } => value,
+        _ => false,
+    };
+
+    if !confirm {
+        println!("Cancelled.");
+        return Ok(());
+    }
+
+    config.groups.remove(pos);
+    save_config(&config, config_path)?;
+    println!("Group '{name}' deleted.");
+    Ok(())
+}
+
+// ── Verify ──
+
+async fn verify_command(config_path: Option<&Path>) -> Result<()> {
+    let config = load_config(config_path).map_err(|_| {
+        anyhow::anyhow!("No configuration found. Run `pulsos repos sync` to get started.")
+    })?;
+
+    if config.correlations.is_empty() {
+        println!("No tracked resources. Run `pulsos repos sync` to get started.");
+        return Ok(());
+    }
+
+    let cache = Arc::new(CacheStore::open_or_temporary());
+    let store: Arc<dyn CredentialStore> = Arc::new(FallbackStore::new()?);
+    let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
+    let health_reports = check_all_platforms_health(&config, &resolver, &cache).await;
+
+    // Resolve tokens and validate platform-level auth once.
+    let gh_client = resolver
+        .resolve(&PlatformKind::GitHub)
+        .map(|t| GitHubClient::new(t, cache.clone()));
+    let rw_client = resolver
+        .resolve(&PlatformKind::Railway)
+        .map(|t| RailwayClient::new(t, cache.clone()));
+    let vc_client = resolver
+        .resolve(&PlatformKind::Vercel)
+        .map(|t| VercelClient::new(t, cache.clone()));
+
+    // Fetch GitHub login once.
+    let gh_login = if let Some(ref gh) = gh_client {
+        match gh.fetch_user_login().await {
+            Ok(login) => Some(login),
+            Err(e) => {
+                println!("[!!] GitHub auth failed: {}", e.user_message());
+                None
+            }
+        }
+    } else {
+        let report = health_reports
+            .iter()
+            .find(|r| r.platform == PlatformKind::GitHub);
+        if let Some(report) = report {
+            println!("[--] GitHub: {} ({})", report.state.label(), report.reason);
+        } else {
+            println!("[--] GitHub: no token configured");
+        }
+        None
+    };
+
+    // Validate Railway auth once.
+    let rw_ok = if let Some(report) = health_reports
+        .iter()
+        .find(|r| r.platform == PlatformKind::Railway)
+    {
+        if report.state == PlatformHealthState::Ready
+            || report.state == PlatformHealthState::AccessOrConfigIncomplete
+        {
+            println!("[ok] Railway: {}", report.reason);
+            true
+        } else {
+            println!("[!!] Railway: {}", report.reason);
+            false
+        }
+    } else {
+        println!("[--] Railway: no token configured");
+        false
+    };
+
+    // Validate Vercel auth once.
+    let vc_ok = if let Some(report) = health_reports
+        .iter()
+        .find(|r| r.platform == PlatformKind::Vercel)
+    {
+        if report.state == PlatformHealthState::Ready
+            || report.state == PlatformHealthState::AccessOrConfigIncomplete
+        {
+            println!("[ok] Vercel: {}", report.reason);
+            true
+        } else {
+            println!("[!!] Vercel: {}", report.reason);
+            false
+        }
+    } else {
+        println!("[--] Vercel: no token configured");
+        false
+    };
+
+    println!();
+    println!("Per-resource checks:");
+    println!("{}", "─".repeat(60));
+
+    for corr in &config.correlations {
+        println!("  {}:", corr.name);
+
+        // GitHub per-repo permission check.
+        if let Some(ref repo) = corr.github_repo {
+            if let (Some(ref gh), Some(ref login)) = (&gh_client, &gh_login) {
+                let parts: Vec<&str> = repo.splitn(2, '/').collect();
+                if parts.len() == 2 {
+                    match gh.check_repo_permission(parts[0], parts[1], login).await {
+                        Ok(perm) => println!("    [ok] GitHub:{repo}  (permission: {perm})"),
+                        Err(e) => println!("    [!!] GitHub:{repo}  {}", e.user_message()),
+                    }
+                } else {
+                    println!("    [!!] GitHub:{repo}  (malformed repo name)");
+                }
+            } else {
+                println!("    [--] GitHub:{repo}  (no token)");
+            }
+        }
+
+        // Railway — token-level check is sufficient.
+        if let Some(ref proj) = corr.railway_project {
+            if rw_ok {
+                println!("    [ok] Railway:{proj}");
+            } else if rw_client.is_none() {
+                println!("    [--] Railway:{proj}  (no token)");
+            } else {
+                println!("    [!!] Railway:{proj}  (auth failed)");
+            }
+        }
+
+        // Vercel — token-level check is sufficient.
+        if let Some(ref proj) = corr.vercel_project {
+            if vc_ok {
+                println!("    [ok] Vercel:{proj}");
+            } else if vc_client.is_none() {
+                println!("    [--] Vercel:{proj}  (no token)");
+            } else {
+                println!("    [!!] Vercel:{proj}  (auth failed)");
+            }
+        }
+    }
+
+    Ok(())
 }

@@ -1,16 +1,13 @@
 //! Tab 3: Health & Metrics — health scores and sparklines per project.
 //!
-//! Shows per-project health scores (0-100) with color coding:
-//! - Green (>= 80): Healthy
-//! - Yellow (>= 50): Degraded
-//! - Red (< 50): Critical
-//!
-//! Bottom section shows a sparkline of the last 20 data points for the
-//! selected project (if sparklines are enabled in TuiConfig).
+//! Color thresholds per §4.2:
+//!   ≥ 90 → status.success (green)
+//!   ≥ 70 → status.warning (yellow)
+//!   < 70 → status.failure (red)
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    prelude::Stylize,
     text::Span,
     widgets::{Block, Borders, Cell, Row, Sparkline, Table, TableState},
     Frame,
@@ -22,8 +19,7 @@ use crate::tui::theme::Theme;
 /// Draw the Health & Metrics tab.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if app.data.health_scores.is_empty() {
-        let msg = ratatui::widgets::Paragraph::new("No health data available.")
-            .style(Style::default().fg(theme.muted));
+        let msg = ratatui::widgets::Paragraph::new("No health data available.").style(theme.t7());
         frame.render_widget(msg, area);
         return;
     }
@@ -56,7 +52,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 fn draw_score_table(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let header_cells = ["Project", "Score", "Status"]
         .iter()
-        .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD).fg(theme.fg)));
+        .map(|h| Cell::from(*h).style(theme.t4()));
     let header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = app
@@ -67,21 +63,22 @@ fn draw_score_table(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .map(|(i, (name, score))| {
             let is_selected = i == app.selected_row;
             let row_style = if is_selected {
-                theme.highlight
+                theme.selected_row()
             } else {
-                Style::default()
+                ratatui::style::Style::default()
             };
 
             let score_color = theme.health_color(*score);
+            let score_style = ratatui::style::Style::new().fg(score_color).bold();
             let status_label = health_status_label(*score);
 
             Row::new(vec![
-                Cell::from(Span::raw(name.clone())),
+                Cell::from(Span::styled(name.clone(), theme.t5())),
+                Cell::from(Span::styled(format!("{score:>3}"), score_style)),
                 Cell::from(Span::styled(
-                    format!("{score:>3}"),
-                    Style::default().fg(score_color),
+                    status_label,
+                    ratatui::style::Style::new().fg(score_color),
                 )),
-                Cell::from(Span::styled(status_label, Style::default().fg(score_color))),
             ])
             .style(row_style)
         })
@@ -96,7 +93,7 @@ fn draw_score_table(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::NONE))
-        .row_highlight_style(theme.highlight);
+        .row_highlight_style(theme.selected_row());
 
     let mut table_state = TableState::default();
     if !app.data.health_scores.is_empty() {
@@ -136,38 +133,39 @@ fn draw_sparklines(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .block(
                 Block::default()
                     .borders(Borders::TOP)
-                    .border_style(Style::default().fg(theme.border))
+                    .border_style(theme.panel_border())
                     .title(Span::styled(
                         format!(
                             " {} (last {} points) ",
                             project_name.unwrap_or(""),
                             data_u64.len()
                         ),
-                        Style::default().fg(theme.fg),
+                        theme.t6(),
                     )),
             )
             .data(&data_u64)
             .max(100)
-            .style(Style::default().fg(theme.in_progress));
+            .style(ratatui::style::Style::new().fg(theme.status_active));
 
         frame.render_widget(sparkline, area);
     } else {
         let msg = ratatui::widgets::Paragraph::new("No history for selected project.")
-            .style(Style::default().fg(theme.muted))
+            .style(theme.t8())
             .block(
                 Block::default()
                     .borders(Borders::TOP)
-                    .border_style(Style::default().fg(theme.border)),
+                    .border_style(theme.panel_border()),
             );
         frame.render_widget(msg, area);
     }
 }
 
 /// Map a health score to a human-readable status label.
+/// Thresholds per §4.2: ≥90 Healthy, ≥70 Degraded, <70 Critical.
 fn health_status_label(score: u8) -> &'static str {
-    if score >= 80 {
+    if score >= 90 {
         "Healthy"
-    } else if score >= 50 {
+    } else if score >= 70 {
         "Degraded"
     } else {
         "Critical"
@@ -187,8 +185,8 @@ mod tests {
         let mut data = DataSnapshot::default();
         data.health_scores = vec![
             ("my-saas".into(), 95),
-            ("api-server".into(), 65),
-            ("frontend".into(), 30),
+            ("api-server".into(), 75),
+            ("frontend".into(), 50),
         ];
         data.health_history = vec![
             ("my-saas".into(), vec![80, 85, 90, 92, 95]),
@@ -241,11 +239,12 @@ mod tests {
 
     #[test]
     fn health_status_labels() {
+        // New thresholds: ≥90 Healthy, ≥70 Degraded, <70 Critical
         assert_eq!(health_status_label(100), "Healthy");
-        assert_eq!(health_status_label(80), "Healthy");
-        assert_eq!(health_status_label(79), "Degraded");
-        assert_eq!(health_status_label(50), "Degraded");
-        assert_eq!(health_status_label(49), "Critical");
+        assert_eq!(health_status_label(90), "Healthy");
+        assert_eq!(health_status_label(89), "Degraded");
+        assert_eq!(health_status_label(70), "Degraded");
+        assert_eq!(health_status_label(69), "Critical");
         assert_eq!(health_status_label(0), "Critical");
     }
 

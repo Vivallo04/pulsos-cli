@@ -1159,6 +1159,58 @@ Vercel API poll:                       every 15 seconds
 
 The TUI always has something to show (cached data), so the user never sees a blank screen. Fresh data replaces cached data asynchronously when it arrives.
 
+### CLI Run Mode Contract (TTY-first)
+
+`pulsos status` behaves like a continuous monitor by default when running in an interactive terminal:
+
+- TTY + `--format table` + no `--once` → launch live TUI
+- `--watch` → force live TUI (backward compatible)
+- `--once` → force one-shot output
+- Non-TTY or `--format json|compact` → one-shot output
+
+Notes:
+- `--watch` on non-TTY is an error.
+- Live mode starts immediately (no initial wait for `refresh_interval`).
+- Poll cycles are cache-first: if a platform is throttled/not-due or errors, last known data remains visible.
+
+### Platform Health + Wizard Contract
+
+Pulsos exposes a unified readiness model for GitHub, Railway, and Vercel:
+
+- `NoToken`
+- `InvalidToken`
+- `ConnectivityError`
+- `AccessOrConfigIncomplete`
+- `Ready`
+
+The readiness report includes: state, reason, next action, last checked time, and provider-specific check details.
+
+Behavioral contract:
+
+- `pulsos config wizard` launches an interactive setup flow (auth + discovery + re-check summary).
+- First run (no config) auto-launches the wizard in TTY mode.
+- `pulsos status` may offer the wizard when enabled platforms are not `Ready`.
+- Interactive TTY commands (`config wizard`, `auth`, `repos`, `views`, and status setup prompts) render full-step screens (clear + redraw) instead of incremental log-style output.
+- Interactive prompts use next-or-cancel navigation; non-TTY/CI paths keep plain non-interactive output.
+- `pulsos doctor` and `pulsos auth status` consume the same readiness engine for consistent diagnostics.
+- TUI includes a `Settings` tab showing per-platform readiness and actions.
+- TUI header shows compact provider badges (`GH`, `RW`, `VC`) reflecting live readiness state.
+- `Settings` supports in-TUI auth actions (`set/replace token`, `validate`, `remove`) and `Onboard` flow (`discover`, `preview`, `apply`) without leaving live mode.
+- TUI setup actions run asynchronously; rendering/polling remains responsive and non-blocking.
+- Poller accepts runtime commands (`ForceRefresh`, `ReplaceConfig`) so token/config changes apply immediately without restarting TUI.
+- Health reports include token source metadata (`env`, `keyring`, `CLI`) for actionable guidance in Settings.
+- In-TUI setup uses immediate-save semantics for successful token and correlation operations.
+- Discovery is skipped if no selected provider has a valid/available token.
+- Settings copy contract:
+  - Use `Onboard` terminology consistently.
+  - Env token hint: `env token is read-only; press T to store override`.
+  - Footer legends:
+    - `[Enter] onboard  [t/T] token  [v] validate  [x] remove  [r] refresh`
+    - `[↑↓] move  [Space] toggle  [Enter] discover  [Esc] cancel`
+    - `[↑↓] move  [Space] toggle  [Enter] preview  [Esc] cancel`
+    - `[Enter] apply  [Esc] back`
+    - `[... ] working`
+
 5.3 Conditional Requests (ETags)
 
 GitHub supports conditional requests via If-None-Match / ETag headers. If the data hasn't changed since the last request, GitHub returns 304 Not Modified and does not count it against the rate limit.
@@ -2004,5 +2056,3 @@ Library errors are typed and matchable. CLI wraps them with anyhow for easy .con
 30s minimum GitHub poll over 5s
 
 Rate limit math. At 5s with 20 repos = 14,400 calls/hour = 3x budget. At 30s = 2,400 = 48% budget. With ETags, real cost is ~720.
-
-

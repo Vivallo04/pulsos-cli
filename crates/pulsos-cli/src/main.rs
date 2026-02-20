@@ -44,6 +44,8 @@ enum Commands {
     Repos(commands::repos::ReposArgs),
     /// Manage saved views
     Views(commands::views::ViewsArgs),
+    /// View and edit configuration
+    Config(commands::config::ConfigArgs),
     /// Diagnostics and troubleshooting
     Doctor(commands::doctor::DoctorArgs),
     /// Generate shell completion scripts
@@ -77,7 +79,8 @@ async fn main() {
         }
         Some(Commands::Auth(args)) => commands::auth::execute(args, config_path).await,
         Some(Commands::Repos(args)) => commands::repos::execute(args, config_path).await,
-        Some(Commands::Views(args)) => commands::views::execute(args).await,
+        Some(Commands::Views(args)) => commands::views::execute(args, config_path).await,
+        Some(Commands::Config(args)) => commands::config::execute(args, config_path).await,
         Some(Commands::Doctor(args)) => commands::doctor::execute(args, config_path).await,
         Some(Commands::Completions { shell }) => {
             let mut cmd = Cli::command();
@@ -92,6 +95,7 @@ async fn main() {
                 view: None,
                 branch: None,
                 watch: false,
+                once: false,
             };
             commands::status::execute(args, cli.format, cli.no_color, config_path).await
         }

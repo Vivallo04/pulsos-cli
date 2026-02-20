@@ -6,9 +6,7 @@
 use chrono::{Duration, Utc};
 use pulsos_core::config::types::CorrelationConfig;
 use pulsos_core::correlation::{correlate_all, correlate_project_events, event_matches_project};
-use pulsos_core::domain::deployment::{
-    DeploymentEvent, DeploymentStatus, EventMetadata, Platform,
-};
+use pulsos_core::domain::deployment::{DeploymentEvent, DeploymentStatus, EventMetadata, Platform};
 use pulsos_core::domain::project::Confidence;
 use std::collections::HashMap;
 
@@ -30,6 +28,7 @@ fn gh_event(repo: &str, sha: &str, offset_secs: i64) -> DeploymentEvent {
             trigger_event: Some("push".into()),
             ..Default::default()
         },
+        is_from_cache: false,
     }
 }
 
@@ -51,6 +50,7 @@ fn rw_event(project_id: &str, service: &str, offset_secs: i64) -> DeploymentEven
             environment_name: Some("production".into()),
             ..Default::default()
         },
+        is_from_cache: false,
     }
 }
 
@@ -71,6 +71,7 @@ fn vc_event(project_id: &str, sha: Option<&str>, offset_secs: i64) -> Deployment
             deploy_target: Some("production".into()),
             ..Default::default()
         },
+        is_from_cache: false,
     }
 }
 

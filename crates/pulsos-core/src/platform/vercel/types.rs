@@ -4,15 +4,16 @@ use serde::{Deserialize, Serialize};
 /// GET /v6/deployments (list response)
 #[derive(Debug, Deserialize)]
 pub struct DeploymentsResponse {
+    #[serde(default)]
     pub deployments: Vec<VcDeployment>,
     pub pagination: Option<VcPagination>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct VcPagination {
-    pub count: u64,
-    pub next: Option<u64>,
-    pub prev: Option<u64>,
+    pub count: Option<u64>,
+    pub next: Option<serde_json::Value>,
+    pub prev: Option<serde_json::Value>,
 }
 
 /// A single Vercel deployment.
@@ -63,6 +64,8 @@ pub enum VcState {
     Ready,
     Error,
     Canceled,
+    #[serde(other)]
+    Unknown,
 }
 
 impl From<VcState> for DeploymentStatus {
@@ -73,6 +76,7 @@ impl From<VcState> for DeploymentStatus {
             VcState::Ready => DeploymentStatus::Success,
             VcState::Error => DeploymentStatus::Failed,
             VcState::Canceled => DeploymentStatus::Cancelled,
+            VcState::Unknown => DeploymentStatus::Unknown("vercel_unknown_state".into()),
         }
     }
 }
@@ -87,6 +91,7 @@ pub struct VcCreator {
 /// GET /v9/projects (list response)
 #[derive(Debug, Deserialize)]
 pub struct ProjectsResponse {
+    #[serde(default)]
     pub projects: Vec<VcProject>,
     pub pagination: Option<VcPagination>,
 }
@@ -117,6 +122,7 @@ pub struct VcProjectLink {
 /// GET /v2/teams
 #[derive(Debug, Deserialize)]
 pub struct TeamsResponse {
+    #[serde(default)]
     pub teams: Vec<VcTeam>,
     pub pagination: Option<VcPagination>,
 }
@@ -125,22 +131,37 @@ pub struct TeamsResponse {
 pub struct VcTeam {
     pub id: String,
     pub name: String,
-    pub slug: String,
+    pub slug: Option<String>,
 }
 
 /// GET /v2/user response for auth validation
 #[derive(Debug, Deserialize)]
 pub struct VcUser {
+    /// Vercel personal tokens return `"id"`, team tokens return `"uid"`.
+    #[serde(alias = "id")]
     pub uid: String,
     pub username: Option<String>,
     pub email: Option<String>,
     pub name: Option<String>,
 }
 
-/// Wrapper for /v2/user endpoint
+/// Wrapper for /v2/user endpoint.
+/// Vercel personal-token responses may return the user nested under a `user` key
+/// or flat at the root level — the untagged enum handles both.
 #[derive(Debug, Deserialize)]
-pub struct VcUserResponse {
-    pub user: VcUser,
+#[serde(untagged)]
+pub enum VcUserResponse {
+    Nested { user: VcUser },
+    Flat(VcUser),
+}
+
+impl VcUserResponse {
+    pub fn into_user(self) -> VcUser {
+        match self {
+            VcUserResponse::Nested { user } => user,
+            VcUserResponse::Flat(u) => u,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -137,6 +137,7 @@ pub fn format_bytes(bytes: u64) -> String {
 }
 
 /// Format a duration as a latency string (e.g., "45ms", "1.2s").
+#[allow(dead_code)]
 pub fn format_latency(duration: Duration) -> String {
     let ms = duration.as_millis();
     if ms < 1000 {

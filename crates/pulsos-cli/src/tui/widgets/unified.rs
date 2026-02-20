@@ -1,28 +1,25 @@
 //! Tab 1: Unified Overview — correlated events across all platforms.
 //!
-//! Each row represents a commit SHA, showing status from GitHub, Railway, and Vercel
-//! side by side, with a confidence indicator for the correlation.
+//! Columns: Project(16) | GitHub CI(12) | Railway(12) | Vercel(12) | Branch(12) | Age(8)
 
 use ratatui::{
-    layout::Rect,
-    style::{Modifier, Style},
-    text::Span,
+    layout::{Constraint, Rect},
+    text::{Line, Span},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
 };
 
-use crate::output::table::{format_age, format_duration, status_indicator};
+use crate::output::table::{format_age, format_duration};
 use crate::tui::app::App;
 use crate::tui::theme::Theme;
-use pulsos_core::domain::deployment::DeploymentStatus;
+use crate::tui::widgets::status_spans;
 
 /// Draw the Unified Overview table.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let header_cells = [
-        "Conf", "SHA", "GitHub", "Railway", "Vercel", "Branch", "Age", "Dur",
-    ]
-    .iter()
-    .map(|h| Cell::from(*h).style(Style::default().add_modifier(Modifier::BOLD).fg(theme.fg)));
+    // Header row (T4: bold + fg.subtle)
+    let header_cells = ["Project", "GitHub CI", "Railway", "Vercel", "Branch", "Age"]
+        .iter()
+        .map(|h| Cell::from(*h).style(theme.t4()));
     let header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = app
@@ -33,50 +30,59 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .map(|(i, corr)| {
             let is_selected = i == app.selected_row;
             let row_style = if is_selected {
-                theme.highlight
+                theme.selected_row()
             } else {
-                Style::default()
+                ratatui::style::Style::default()
             };
 
-            let confidence = corr.confidence.to_string();
-            let sha = corr
-                .commit_sha
-                .as_deref()
-                .map(|s| &s[..s.len().min(7)])
-                .unwrap_or("-");
-
-            let gh_status = corr
-                .github
-                .as_ref()
-                .map(|e| status_indicator(&e.status))
-                .unwrap_or_else(|| "-".into());
-            let gh_color = corr
-                .github
-                .as_ref()
-                .map(|e| status_color(&e.status, theme))
-                .unwrap_or(theme.muted);
-
-            let rw_status = corr
-                .railway
-                .as_ref()
-                .map(|e| status_indicator(&e.status))
-                .unwrap_or_else(|| "-".into());
-            let rw_color = corr
-                .railway
-                .as_ref()
-                .map(|e| status_color(&e.status, theme))
-                .unwrap_or(theme.muted);
-
-            let vc_status = corr
+            // Project identifier: prefer Vercel/Railway title, fall back to SHA prefix
+            let project_name = corr
                 .vercel
                 .as_ref()
-                .map(|e| status_indicator(&e.status))
-                .unwrap_or_else(|| "-".into());
-            let vc_color = corr
-                .vercel
-                .as_ref()
-                .map(|e| status_color(&e.status, theme))
-                .unwrap_or(theme.muted);
+                .and_then(|e| e.title.as_deref())
+                .or_else(|| corr.railway.as_ref().and_then(|e| e.title.as_deref()))
+                .or_else(|| corr.github.as_ref().and_then(|e| e.title.as_deref()))
+                .or_else(|| {
+                    corr.commit_sha
+                        .as_deref()
+                        .map(|s| if s.len() > 8 { &s[..8] } else { s })
+                })
+                .unwrap_or("-")
+                .to_string();
+
+            // Status badge cells for each platform
+            let gh_cell = match corr.github.as_ref() {
+                Some(e) => {
+                    let (sym, label, style) = status_spans(&e.status, theme);
+                    Cell::from(Line::from(vec![
+                        Span::styled(sym, style),
+                        Span::styled(label, style),
+                    ]))
+                }
+                None => Cell::from(Span::styled("—", theme.t8())),
+            };
+
+            let rw_cell = match corr.railway.as_ref() {
+                Some(e) => {
+                    let (sym, label, style) = status_spans(&e.status, theme);
+                    Cell::from(Line::from(vec![
+                        Span::styled(sym, style),
+                        Span::styled(label, style),
+                    ]))
+                }
+                None => Cell::from(Span::styled("—", theme.t8())),
+            };
+
+            let vc_cell = match corr.vercel.as_ref() {
+                Some(e) => {
+                    let (sym, label, style) = status_spans(&e.status, theme);
+                    Cell::from(Line::from(vec![
+                        Span::styled(sym, style),
+                        Span::styled(label, style),
+                    ]))
+                }
+                None => Cell::from(Span::styled("—", theme.t8())),
+            };
 
             let branch = corr
                 .github
@@ -86,7 +92,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 .unwrap_or("-");
 
             let age = format_age(corr.timestamp);
-            let duration = corr
+
+            // Stale indicator appended to age
+            let age_display = if corr.is_stale {
+                format!("{age} ●")
+            } else {
+                age
+            };
+
+            // Duration for reference (not shown as a column but kept for tooltip potential)
+            let _duration = corr
                 .github
                 .as_ref()
                 .and_then(|e| e.duration_secs)
@@ -94,34 +109,30 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 .unwrap_or_else(|| "-".into());
 
             Row::new(vec![
-                Cell::from(Span::raw(confidence)),
-                Cell::from(Span::raw(sha.to_string())),
-                Cell::from(Span::styled(gh_status, Style::default().fg(gh_color))),
-                Cell::from(Span::styled(rw_status, Style::default().fg(rw_color))),
-                Cell::from(Span::styled(vc_status, Style::default().fg(vc_color))),
-                Cell::from(Span::raw(branch.to_string())),
-                Cell::from(Span::raw(age)),
-                Cell::from(Span::raw(duration)),
+                Cell::from(Span::styled(project_name, theme.t5())),
+                gh_cell,
+                rw_cell,
+                vc_cell,
+                Cell::from(Span::styled(branch.to_string(), theme.t6())),
+                Cell::from(Span::styled(age_display, theme.t8())),
             ])
             .style(row_style)
         })
         .collect();
 
     let widths = [
-        ratatui::layout::Constraint::Length(12), // Conf
-        ratatui::layout::Constraint::Length(8),  // SHA
-        ratatui::layout::Constraint::Length(8),  // GitHub
-        ratatui::layout::Constraint::Length(8),  // Railway
-        ratatui::layout::Constraint::Length(8),  // Vercel
-        ratatui::layout::Constraint::Length(12), // Branch
-        ratatui::layout::Constraint::Length(10), // Age
-        ratatui::layout::Constraint::Min(6),     // Dur
+        Constraint::Length(16), // Project
+        Constraint::Length(12), // GitHub CI
+        Constraint::Length(12), // Railway
+        Constraint::Length(12), // Vercel
+        Constraint::Length(12), // Branch
+        Constraint::Min(8),     // Age
     ];
 
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::NONE))
-        .row_highlight_style(theme.highlight);
+        .row_highlight_style(theme.selected_row());
 
     let mut table_state = TableState::default();
     if !app.data.correlated.is_empty() {
@@ -129,19 +140,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     }
 
     frame.render_stateful_widget(table, area, &mut table_state);
-}
-
-fn status_color(status: &DeploymentStatus, theme: &Theme) -> ratatui::style::Color {
-    match status {
-        DeploymentStatus::Success => theme.success,
-        DeploymentStatus::Failed => theme.failure,
-        DeploymentStatus::InProgress => theme.in_progress,
-        DeploymentStatus::Queued => theme.queued,
-        DeploymentStatus::Cancelled | DeploymentStatus::Skipped => theme.muted,
-        DeploymentStatus::ActionRequired => theme.warning,
-        DeploymentStatus::Sleeping => theme.muted,
-        DeploymentStatus::Unknown(_) => theme.muted,
-    }
 }
 
 #[cfg(test)]
@@ -174,6 +172,7 @@ mod tests {
                     duration_secs: Some(42),
                     url: None,
                     metadata: EventMetadata::default(),
+                    is_from_cache: false,
                 }),
                 railway: Some(DeploymentEvent {
                     id: "rw-1".into(),
@@ -188,10 +187,12 @@ mod tests {
                     duration_secs: None,
                     url: None,
                     metadata: EventMetadata::default(),
+                    is_from_cache: false,
                 }),
                 vercel: None,
                 confidence: Confidence::High,
                 timestamp: Utc::now(),
+                is_stale: false,
             },
             CorrelatedEvent {
                 commit_sha: Some("def456ghi789".into()),
@@ -208,11 +209,13 @@ mod tests {
                     duration_secs: Some(120),
                     url: None,
                     metadata: EventMetadata::default(),
+                    is_from_cache: false,
                 }),
                 railway: None,
                 vercel: None,
                 confidence: Confidence::Unmatched,
                 timestamp: Utc::now(),
+                is_stale: false,
             },
         ]
     }
@@ -233,12 +236,15 @@ mod tests {
             })
             .unwrap();
 
-        // Verify buffer contains expected text
         let buf = terminal.backend().buffer().clone();
         let text = buffer_to_string(&buf);
-        assert!(text.contains("abc123"), "Should contain SHA prefix");
-        assert!(text.contains("OK"), "Should contain success status");
-        assert!(text.contains("FAIL"), "Should contain failed status");
+        // Project column now shows title ("CI", "Deploy") rather than raw SHA
+        assert!(
+            text.contains("CI") || text.contains("abc123"),
+            "Should contain project name or SHA"
+        );
+        assert!(text.contains("passed"), "Should contain success status");
+        assert!(text.contains("failed"), "Should contain failed status");
         assert!(text.contains("main"), "Should contain branch");
     }
 

@@ -4,28 +4,22 @@
 //! tracked resources, correlations, cache, and optional CLI detection.
 
 use super::doctor_fmt::{
-    count_issues, format_bytes, format_latency, print_check, print_section, print_summary,
-    CheckResult, CheckStatus,
+    count_issues, format_bytes, print_check, print_section, print_summary, CheckResult, CheckStatus,
 };
 use anyhow::Result;
-use chrono::Utc;
 use clap::Args;
 use pulsos_core::auth::credential_store::KeyringStore;
 use pulsos_core::auth::detect;
 use pulsos_core::auth::resolve::TokenResolver;
-use pulsos_core::auth::validate::validate_token;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::load_config;
 use pulsos_core::config::types::PulsosConfig;
+use pulsos_core::health::{check_all_platforms_health, PlatformHealthReport, PlatformHealthState};
 use pulsos_core::platform::github::client::GitHubClient;
-use pulsos_core::platform::railway::client::RailwayClient;
-use pulsos_core::platform::vercel::client::VercelClient;
 use pulsos_core::platform::PlatformAdapter;
-use secrecy::SecretString;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 
 #[derive(Debug, Args)]
 pub struct DoctorArgs {}
@@ -47,6 +41,8 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
     let mut total_warnings = 0usize;
     let mut total_errors = 0usize;
     let mut suggestions: Vec<String> = Vec::new();
+    let health_reports =
+        check_all_platforms_health(&config.clone().unwrap_or_default(), &resolver, &cache).await;
 
     // Section 1: System
     let results = check_system();
@@ -58,7 +54,7 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
     println!();
 
     // Section 2: Authentication
-    let results = check_auth(&resolver, &cache).await;
+    let results = check_auth(&health_reports);
     print_section("Authentication");
     for r in &results {
         print_check(r);
@@ -68,7 +64,7 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
     println!();
 
     // Section 3: API Connectivity
-    let results = check_connectivity(&resolver, &cache).await;
+    let results = check_connectivity(&health_reports);
     print_section("API Connectivity");
     for r in &results {
         print_check(r);
@@ -155,67 +151,45 @@ fn check_system() -> Vec<CheckResult> {
 
 // ── Section 2: Authentication ──
 
-async fn check_auth(resolver: &TokenResolver, cache: &Arc<CacheStore>) -> Vec<CheckResult> {
+fn check_auth(reports: &[PlatformHealthReport]) -> Vec<CheckResult> {
     let mut results = Vec::new();
 
-    for platform in &PlatformKind::ALL {
-        match resolver.resolve_with_source(platform) {
-            Some((token, source)) => match validate_token(platform, token, cache).await {
-                Ok(status) => {
-                    let value = format!("{} ({})", status.identity, source);
-                    let mut result = if !status.warnings.is_empty() {
-                        CheckResult::warning(platform.display_name(), &value)
-                    } else {
-                        CheckResult::ok(platform.display_name(), &value)
-                    };
-
-                    // Check expiry
-                    if let Some(expires_at) = status.expires_at {
-                        let days_until = (expires_at - Utc::now()).num_days();
-                        if days_until <= 7 {
-                            result = CheckResult::warning(
-                                platform.display_name(),
-                                format!("{value} — expires in {days_until} days"),
-                            );
-                        }
-                    }
-
-                    // Attach scope warnings as detail
-                    if !status.warnings.is_empty() {
-                        result = result.with_detail(status.warnings.join("; "));
-                    }
-
-                    results.push(result);
-                }
-                Err(e) => {
-                    results.push(CheckResult::error(
-                        platform.display_name(),
-                        format!("FAIL via {source} — {e}"),
-                    ));
-                }
-            },
-            None => {
-                results.push(CheckResult::warning(
-                    platform.display_name(),
-                    "no token found",
-                ));
+    for report in reports {
+        let mut result = match report.state {
+            PlatformHealthState::Ready => {
+                CheckResult::ok(report.platform.display_name(), report.state.label())
             }
-        }
+            PlatformHealthState::NoToken => {
+                CheckResult::warning(report.platform.display_name(), report.state.label())
+            }
+            PlatformHealthState::AccessOrConfigIncomplete => {
+                CheckResult::warning(report.platform.display_name(), report.state.label())
+            }
+            PlatformHealthState::InvalidToken => {
+                CheckResult::error(report.platform.display_name(), report.state.label())
+            }
+            PlatformHealthState::ConnectivityError => {
+                CheckResult::error(report.platform.display_name(), report.state.label())
+            }
+        };
+
+        result = result.with_detail(format!("{} Next: {}", report.reason, report.next_action));
+        results.push(result);
     }
 
     results
 }
 
 fn collect_auth_suggestions(result: &CheckResult, suggestions: &mut Vec<String>) {
-    if result.status == CheckStatus::Warning && result.value.contains("no token found") {
+    if result.value.contains("No Token") {
         suggestions.push(format!(
             "Run `pulsos auth {}` to authenticate.",
             result.label.to_lowercase()
         ));
     }
-    if result.value.contains("expires in") {
+    if result.value.contains("Invalid Token") {
         suggestions.push(format!(
-            "Run `pulsos auth {}` to refresh expiring token.",
+            "Run `pulsos auth {}` to refresh token.",
             result.label.to_lowercase()
         ));
     }
@@ -223,7 +197,7 @@ fn collect_auth_suggestions(result: &CheckResult, suggestions: &mut Vec<String>)
 
 // ── Section 3: API Connectivity ──
 
-async fn check_connectivity(resolver: &TokenResolver, cache: &Arc<CacheStore>) -> Vec<CheckResult> {
+fn check_connectivity(reports: &[PlatformHealthReport]) -> Vec<CheckResult> {
     let mut results = Vec::new();
 
     let endpoints = [
@@ -233,54 +207,31 @@ async fn check_connectivity(resolver: &TokenResolver, cache: &Arc<CacheStore>) -
     ];
 
     for (platform, host) in &endpoints {
-        match resolver.resolve(platform) {
-            Some(token) => {
-                let start = Instant::now();
-                let reachable = ping_platform(platform, token, cache).await;
-                let elapsed = start.elapsed();
+        let Some(report) = reports.iter().find(|r| r.platform == *platform) else {
+            results.push(CheckResult::skipped(*host, "no health report"));
+            continue;
+        };
 
-                match reachable {
-                    Ok(()) => {
-                        results.push(CheckResult::ok(
-                            *host,
-                            format!("reachable ({})", format_latency(elapsed)),
-                        ));
-                    }
-                    Err(e) => {
-                        results.push(CheckResult::error(*host, format!("unreachable — {e}")));
-                    }
-                }
-            }
-            None => {
+        match report.state {
+            PlatformHealthState::NoToken => {
                 results.push(CheckResult::skipped(*host, "skipped (no token)"));
+            }
+            PlatformHealthState::ConnectivityError => {
+                results.push(CheckResult::error(
+                    *host,
+                    format!("unreachable — {}", report.reason),
+                ));
+            }
+            _ => {
+                results.push(CheckResult::ok(
+                    *host,
+                    "reachable (validated auth endpoint)",
+                ));
             }
         }
     }
 
     results
-}
-
-/// Test connectivity by calling validate_auth (minimal API call).
-async fn ping_platform(
-    platform: &PlatformKind,
-    token: SecretString,
-    cache: &Arc<CacheStore>,
-) -> Result<(), String> {
-    match platform {
-        PlatformKind::GitHub => {
-            let client = GitHubClient::new(token, cache.clone());
-            client.validate_auth().await.map_err(|e| e.to_string())?;
-        }
-        PlatformKind::Railway => {
-            let client = RailwayClient::new(token, cache.clone());
-            client.validate_auth().await.map_err(|e| e.to_string())?;
-        }
-        PlatformKind::Vercel => {
-            let client = VercelClient::new(token, cache.clone());
-            client.validate_auth().await.map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
 }
 
 // ── Section 4: Rate Limits ──

@@ -7,6 +7,7 @@ use crate::platform::{
 use chrono::{DateTime, Utc};
 use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::types::{
     DeploymentsResponse, ProjectsResponse, TeamsResponse, VcDeployment, VcUserResponse,
@@ -31,6 +32,8 @@ impl VercelClient {
     ) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("Failed to build HTTP client");
 
@@ -53,19 +56,32 @@ impl VercelClient {
         headers
     }
 
+    async fn parse_json<T: serde::de::DeserializeOwned>(
+        &self,
+        resp: reqwest::Response,
+        endpoint: &str,
+    ) -> Result<T, PulsosError> {
+        let body_text = resp.text().await.unwrap_or_default();
+        serde_json::from_str(&body_text).map_err(|e| {
+            tracing::debug!(endpoint, body = %body_text, "Vercel parse failed");
+            PulsosError::ParseError {
+                platform: "Vercel".into(),
+                message: format!(
+                    "{endpoint}: {e} — raw: {}",
+                    &body_text[..body_text.len().min(240)]
+                ),
+            }
+        })
+    }
+
     async fn fetch_deployments(&self, project_id: &str) -> Result<Vec<VcDeployment>, PulsosError> {
-        let resp = self
+        let req = self
             .client
             .get(format!("{}/v6/deployments", self.base_url))
             .query(&[("projectId", project_id), ("limit", "5")])
-            .headers(self.auth_headers())
-            .send()
-            .await
-            .map_err(|e| PulsosError::Network {
-                platform: "Vercel".into(),
-                message: e.to_string(),
-                source: Some(e),
-            })?;
+            .headers(self.auth_headers());
+
+        let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -90,15 +106,12 @@ impl VercelClient {
             });
         }
 
-        let body: DeploymentsResponse = resp.json().await.map_err(|e| PulsosError::ParseError {
-            platform: "Vercel".into(),
-            message: e.to_string(),
-        })?;
+        let body: DeploymentsResponse = self.parse_json(resp, "/v6/deployments").await?;
 
         Ok(body.deployments)
     }
 
-    fn deployment_to_event(deployment: &VcDeployment) -> DeploymentEvent {
+    fn deployment_to_event(deployment: &VcDeployment, is_from_cache: bool) -> DeploymentEvent {
         let status = deployment
             .ready_state
             .or(deployment.state)
@@ -147,6 +160,7 @@ impl VercelClient {
                 deploy_target: deployment.target.clone(),
                 ..Default::default()
             },
+            is_from_cache,
         }
     }
 
@@ -159,17 +173,9 @@ impl VercelClient {
         let mut results = Vec::new();
 
         let teams_url = format!("{}/v2/teams", self.base_url);
-        let resp = self
-            .client
-            .get(&teams_url)
-            .headers(self.auth_headers())
-            .send()
-            .await
-            .map_err(|e| PulsosError::Network {
-                platform: "Vercel".into(),
-                message: e.to_string(),
-                source: Some(e),
-            })?;
+        let req = self.client.get(&teams_url).headers(self.auth_headers());
+
+        let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -181,31 +187,16 @@ impl VercelClient {
             });
         }
 
-        let teams: TeamsResponse = resp.json().await.map_err(|e| PulsosError::ParseError {
-            platform: "Vercel".into(),
-            message: e.to_string(),
-        })?;
+        let teams: TeamsResponse = self.parse_json(resp, "/v2/teams").await?;
 
         for team in &teams.teams {
             let projects_url = format!("{}/v9/projects?teamId={}", self.base_url, team.id);
-            let resp = self
-                .client
-                .get(&projects_url)
-                .headers(self.auth_headers())
-                .send()
-                .await
-                .map_err(|e| PulsosError::Network {
-                    platform: "Vercel".into(),
-                    message: e.to_string(),
-                    source: Some(e),
-                })?;
+            let req = self.client.get(&projects_url).headers(self.auth_headers());
+
+            let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
             if resp.status().is_success() {
-                let projects: ProjectsResponse =
-                    resp.json().await.map_err(|e| PulsosError::ParseError {
-                        platform: "Vercel".into(),
-                        message: e.to_string(),
-                    })?;
+                let projects: ProjectsResponse = self.parse_json(resp, "/v9/projects").await?;
 
                 for proj in &projects.projects {
                     let linked_repo = proj.link.as_ref().and_then(|l| l.repo.clone());
@@ -243,7 +234,7 @@ impl PlatformAdapter for VercelClient {
                     let _ = self.cache.set(&cache_key, &deployments, 30, None);
 
                     for d in &deployments {
-                        all_events.push(Self::deployment_to_event(d));
+                        all_events.push(Self::deployment_to_event(d, false));
                     }
                 }
                 Err(e) => {
@@ -256,7 +247,7 @@ impl PlatformAdapter for VercelClient {
                         crate::cache::keys::vercel_deployments_key(&resource.platform_id);
                     if let Ok(Some(cached)) = self.cache.get::<Vec<VcDeployment>>(&cache_key) {
                         for d in &cached.data {
-                            all_events.push(Self::deployment_to_event(d));
+                            all_events.push(Self::deployment_to_event(d, true));
                         }
                     }
                 }
@@ -272,17 +263,9 @@ impl PlatformAdapter for VercelClient {
 
         // Fetch teams
         let teams_url = format!("{}/v2/teams", self.base_url);
-        let resp = self
-            .client
-            .get(&teams_url)
-            .headers(self.auth_headers())
-            .send()
-            .await
-            .map_err(|e| PulsosError::Network {
-                platform: "Vercel".into(),
-                message: e.to_string(),
-                source: Some(e),
-            })?;
+        let req = self.client.get(&teams_url).headers(self.auth_headers());
+
+        let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -294,31 +277,16 @@ impl PlatformAdapter for VercelClient {
             });
         }
 
-        let teams: TeamsResponse = resp.json().await.map_err(|e| PulsosError::ParseError {
-            platform: "Vercel".into(),
-            message: e.to_string(),
-        })?;
+        let teams: TeamsResponse = self.parse_json(resp, "/v2/teams").await?;
 
         for team in &teams.teams {
             let projects_url = format!("{}/v9/projects?teamId={}", self.base_url, team.id);
-            let resp = self
-                .client
-                .get(&projects_url)
-                .headers(self.auth_headers())
-                .send()
-                .await
-                .map_err(|e| PulsosError::Network {
-                    platform: "Vercel".into(),
-                    message: e.to_string(),
-                    source: Some(e),
-                })?;
+            let req = self.client.get(&projects_url).headers(self.auth_headers());
+
+            let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
             if resp.status().is_success() {
-                let projects: ProjectsResponse =
-                    resp.json().await.map_err(|e| PulsosError::ParseError {
-                        platform: "Vercel".into(),
-                        message: e.to_string(),
-                    })?;
+                let projects: ProjectsResponse = self.parse_json(resp, "/v9/projects").await?;
 
                 for proj in &projects.projects {
                     resources.push(DiscoveredResource {
@@ -338,17 +306,9 @@ impl PlatformAdapter for VercelClient {
 
     async fn validate_auth(&self) -> Result<AuthStatus, PulsosError> {
         let url = format!("{}/v2/user", self.base_url);
-        let resp = self
-            .client
-            .get(&url)
-            .headers(self.auth_headers())
-            .send()
-            .await
-            .map_err(|e| PulsosError::Network {
-                platform: "Vercel".into(),
-                message: e.to_string(),
-                source: Some(e),
-            })?;
+        let req = self.client.get(&url).headers(self.auth_headers());
+
+        let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
         if !resp.status().is_success() {
             return Err(PulsosError::AuthFailed {
@@ -357,16 +317,17 @@ impl PlatformAdapter for VercelClient {
             });
         }
 
-        let user_resp: VcUserResponse = resp.json().await.map_err(|e| PulsosError::ParseError {
-            platform: "Vercel".into(),
-            message: e.to_string(),
+        let body_text = resp.text().await.unwrap_or_default();
+        let user_resp: VcUserResponse = serde_json::from_str(&body_text).map_err(|e| {
+            tracing::debug!(body = %body_text, "Vercel /v2/user parse failed");
+            PulsosError::ParseError {
+                platform: "Vercel".into(),
+                message: format!("{e} — raw: {}", &body_text[..body_text.len().min(200)]),
+            }
         })?;
 
-        let identity = user_resp
-            .user
-            .username
-            .or(user_resp.user.name)
-            .unwrap_or(user_resp.user.uid);
+        let user = user_resp.into_user();
+        let identity = user.username.or(user.name).unwrap_or(user.uid);
 
         Ok(AuthStatus {
             valid: true,

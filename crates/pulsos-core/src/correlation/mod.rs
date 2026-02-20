@@ -116,12 +116,11 @@ pub fn correlate_project_events(
             railway[m.candidate_index].clone()
         });
 
-        let timestamp = github[*gi]
-            .created_at
-            .min(vercel[*vi].created_at)
-            .min(railway_event.as_ref().map_or(github[*gi].created_at, |r| {
-                r.created_at
-            }));
+        let timestamp = github[*gi].created_at.min(vercel[*vi].created_at).min(
+            railway_event
+                .as_ref()
+                .map_or(github[*gi].created_at, |r| r.created_at),
+        );
 
         let railway_conf = if railway_event.is_some() {
             score_confidence(false, true, has_railway_mapping)
@@ -132,6 +131,10 @@ pub fn correlate_project_events(
         // the overall is still Exact (SHA is the primary signal)
         let _ = railway_conf;
 
+        let is_stale = github[*gi].is_from_cache
+            || railway_event.as_ref().map_or(false, |e| e.is_from_cache)
+            || vercel[*vi].is_from_cache;
+
         result.push(CorrelatedEvent {
             commit_sha: github[*gi].commit_sha.clone(),
             github: Some(github[*gi].clone()),
@@ -139,6 +142,7 @@ pub fn correlate_project_events(
             vercel: Some(vercel[*vi].clone()),
             confidence: Confidence::Exact,
             timestamp,
+            is_stale,
         });
     }
 
@@ -149,16 +153,12 @@ pub fn correlate_project_events(
         }
         claimed_github[gi] = true;
 
-        let railway_event = find_closest_by_timestamp(
-            gh_event,
-            &railway,
-            &claimed_railway,
-            TIMESTAMP_WINDOW_SECS,
-        )
-        .map(|m| {
-            claimed_railway[m.candidate_index] = true;
-            railway[m.candidate_index].clone()
-        });
+        let railway_event =
+            find_closest_by_timestamp(gh_event, &railway, &claimed_railway, TIMESTAMP_WINDOW_SECS)
+                .map(|m| {
+                    claimed_railway[m.candidate_index] = true;
+                    railway[m.candidate_index].clone()
+                });
 
         let confidence = if railway_event.is_some() {
             score_confidence(false, true, has_railway_mapping)
@@ -172,6 +172,9 @@ pub fn correlate_project_events(
                 .map_or(gh_event.created_at, |r| r.created_at),
         );
 
+        let is_stale =
+            gh_event.is_from_cache || railway_event.as_ref().map_or(false, |e| e.is_from_cache);
+
         result.push(CorrelatedEvent {
             commit_sha: gh_event.commit_sha.clone(),
             github: Some((*gh_event).clone()),
@@ -179,6 +182,7 @@ pub fn correlate_project_events(
             vercel: None,
             confidence,
             timestamp,
+            is_stale,
         });
     }
 
@@ -189,16 +193,12 @@ pub fn correlate_project_events(
         }
         claimed_vercel[vi] = true;
 
-        let railway_event = find_closest_by_timestamp(
-            vc_event,
-            &railway,
-            &claimed_railway,
-            TIMESTAMP_WINDOW_SECS,
-        )
-        .map(|m| {
-            claimed_railway[m.candidate_index] = true;
-            railway[m.candidate_index].clone()
-        });
+        let railway_event =
+            find_closest_by_timestamp(vc_event, &railway, &claimed_railway, TIMESTAMP_WINDOW_SECS)
+                .map(|m| {
+                    claimed_railway[m.candidate_index] = true;
+                    railway[m.candidate_index].clone()
+                });
 
         let confidence = if railway_event.is_some() {
             score_confidence(false, true, has_railway_mapping)
@@ -212,6 +212,9 @@ pub fn correlate_project_events(
                 .map_or(vc_event.created_at, |r| r.created_at),
         );
 
+        let is_stale =
+            vc_event.is_from_cache || railway_event.as_ref().map_or(false, |e| e.is_from_cache);
+
         result.push(CorrelatedEvent {
             commit_sha: vc_event.commit_sha.clone(),
             github: None,
@@ -219,6 +222,7 @@ pub fn correlate_project_events(
             vercel: Some((*vc_event).clone()),
             confidence,
             timestamp,
+            is_stale,
         });
     }
 
@@ -235,6 +239,7 @@ pub fn correlate_project_events(
             vercel: None,
             confidence: Confidence::Unmatched,
             timestamp: rw_event.created_at,
+            is_stale: rw_event.is_from_cache,
         });
     }
 
@@ -286,6 +291,7 @@ pub fn correlate_all(
             vercel,
             confidence: Confidence::Unmatched,
             timestamp: event.created_at,
+            is_stale: event.is_from_cache,
         });
     }
 
@@ -319,6 +325,7 @@ mod tests {
                 trigger_event: Some("push".into()),
                 ..Default::default()
             },
+            is_from_cache: false,
         }
     }
 
@@ -340,6 +347,7 @@ mod tests {
                 environment_name: Some("production".into()),
                 ..Default::default()
             },
+            is_from_cache: false,
         }
     }
 
@@ -360,6 +368,7 @@ mod tests {
                 deploy_target: Some("production".into()),
                 ..Default::default()
             },
+            is_from_cache: false,
         }
     }
 
@@ -486,7 +495,9 @@ mod tests {
         assert_eq!(correlated.len(), 2);
 
         // Should have one Exact (my-saas) and one Unmatched (api-core standalone)
-        let exact = correlated.iter().find(|c| c.confidence == Confidence::Exact);
+        let exact = correlated
+            .iter()
+            .find(|c| c.confidence == Confidence::Exact);
         assert!(exact.is_some());
         assert!(exact.unwrap().github.is_some());
         assert!(exact.unwrap().vercel.is_some());

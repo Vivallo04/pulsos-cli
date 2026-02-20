@@ -16,6 +16,8 @@ pub struct PulsosConfig {
     #[serde(default)]
     pub views: Vec<ViewConfig>,
     #[serde(default)]
+    pub groups: Vec<GroupConfig>,
+    #[serde(default)]
     pub tui: TuiConfig,
     #[serde(default)]
     pub cache: CacheConfig,
@@ -145,6 +147,15 @@ pub struct CorrelationConfig {
     pub vercel_team: Option<String>,
     #[serde(default)]
     pub branch_mapping: HashMap<String, String>,
+}
+
+// ── Groups ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GroupConfig {
+    pub name: String,
+    #[serde(default)]
+    pub resources: Vec<String>,
 }
 
 // ── Views ──

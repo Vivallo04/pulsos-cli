@@ -7,8 +7,12 @@ use crate::platform::{
 use chrono::Utc;
 use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
+use std::time::Duration;
 
-use super::types::{DeploymentsData, GqlResponse, MeData, ProjectsData, RwDeployment, TeamsData};
+use super::types::{
+    DeploymentsData, GqlResponse, MeData, ProjectsData, RwDeployment, TeamsData, WorkspaceData,
+    WorkspaceProjectsData,
+};
 
 pub struct RailwayClient {
     client: reqwest::Client,
@@ -33,6 +37,8 @@ impl RailwayClient {
     ) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("Failed to build HTTP client");
 
@@ -54,7 +60,7 @@ impl RailwayClient {
             "variables": variables,
         });
 
-        let resp = self
+        let req = self
             .client
             .post(&self.base_url)
             .header(
@@ -62,14 +68,9 @@ impl RailwayClient {
                 format!("Bearer {}", self.token.expose_secret()),
             )
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| PulsosError::Network {
-                platform: "Railway".into(),
-                message: e.to_string(),
-                source: Some(e),
-            })?;
+            .json(&body);
+
+        let resp = crate::platform::retry::send_with_retry(req, "Railway").await?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -101,13 +102,26 @@ impl RailwayClient {
 
         if let Some(errors) = gql_resp.errors {
             if !errors.is_empty() {
+                let message = errors
+                    .iter()
+                    .map(|e| e.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+
+                // "Not Authorized" at the GraphQL level almost always means a
+                // Workspace or Project token was used instead of an Account token.
+                let message = if message.to_ascii_lowercase().contains("not authorized") {
+                    format!(
+                        "{message} — use an Account token (not a Workspace or Project token). \
+                         Create one at https://railway.com/account/tokens"
+                    )
+                } else {
+                    message
+                };
+
                 return Err(PulsosError::GraphqlError {
                     platform: "Railway".into(),
-                    message: errors
-                        .iter()
-                        .map(|e| e.message.clone())
-                        .collect::<Vec<_>>()
-                        .join("; "),
+                    message,
                 });
             }
         }
@@ -122,6 +136,7 @@ impl RailwayClient {
         deployment: &RwDeployment,
         service_name: Option<&str>,
         environment_name: Option<&str>,
+        is_from_cache: bool,
     ) -> DeploymentEvent {
         DeploymentEvent {
             id: deployment.id.clone(),
@@ -143,7 +158,54 @@ impl RailwayClient {
                 environment_name: environment_name.map(String::from),
                 ..Default::default()
             },
+            is_from_cache,
         }
+    }
+
+    async fn discover_legacy_by_teams(&self) -> Result<Vec<DiscoveredResource>, PulsosError> {
+        let teams_data: TeamsData = self
+            .execute_query(TEAMS_QUERY, serde_json::json!({}))
+            .await?;
+        let mut resources = Vec::new();
+
+        for team_edge in &teams_data.teams.edges {
+            let team = &team_edge.node;
+            let projects_data: ProjectsData = self
+                .execute_query(
+                    LEGACY_PROJECTS_QUERY,
+                    serde_json::json!({ "teamId": team.id }),
+                )
+                .await?;
+
+            for proj_edge in &projects_data.projects.edges {
+                let proj = &proj_edge.node;
+                let services: Vec<_> = proj.services.edges.iter().map(|s| &s.node).collect();
+                let environments: Vec<_> =
+                    proj.environments.edges.iter().map(|e| &e.node).collect();
+
+                if services.is_empty() || environments.is_empty() {
+                    continue;
+                }
+
+                for service in &services {
+                    for environment in &environments {
+                        resources.push(DiscoveredResource {
+                            platform_id: format!("{}:{}:{}", proj.id, service.id, environment.id),
+                            display_name: format!(
+                                "{} / {} / {}",
+                                proj.name, service.name, environment.name
+                            ),
+                            group: team.name.clone(),
+                            group_type: "workspace".into(),
+                            archived: false,
+                            disabled: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(resources)
     }
 }
 
@@ -163,6 +225,42 @@ query($input: DeploymentListInput!, $first: Int) {
 "#;
 
 const PROJECTS_QUERY: &str = r#"
+query {
+  projects {
+    edges {
+      node {
+        id
+        name
+        workspaceId
+        workspace {
+          id
+          name
+        }
+        description
+        createdAt
+        services {
+          edges {
+            node {
+              id
+              name
+            }
+          }
+        }
+        environments {
+          edges {
+            node {
+              id
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+const LEGACY_PROJECTS_QUERY: &str = r#"
 query($teamId: String!) {
   projects(teamId: $teamId) {
     edges {
@@ -193,12 +291,46 @@ query($teamId: String!) {
 }
 "#;
 
-const ME_QUERY: &str = r#"
-query {
-  me {
+const WORKSPACE_QUERY: &str = r#"
+query($workspaceId: String!) {
+  workspace(workspaceId: $workspaceId) {
     id
-    email
     name
+  }
+}
+"#;
+
+const WORKSPACE_PROJECTS_QUERY: &str = r#"
+query($workspaceId: String!) {
+  workspace(workspaceId: $workspaceId) {
+    id
+    name
+    projects {
+      edges {
+        node {
+          id
+          name
+          description
+          createdAt
+          services {
+            edges {
+              node {
+                id
+                name
+              }
+            }
+          }
+          environments {
+            edges {
+              node {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 "#;
@@ -212,6 +344,16 @@ query {
         name
       }
     }
+  }
+}
+"#;
+
+const ME_QUERY: &str = r#"
+query {
+  me {
+    id
+    email
+    name
   }
 }
 "#;
@@ -260,6 +402,7 @@ impl PlatformAdapter for RailwayClient {
                             d,
                             Some(&resource.display_name),
                             None,
+                            false,
                         ));
                     }
                 }
@@ -277,6 +420,7 @@ impl PlatformAdapter for RailwayClient {
                                 d,
                                 Some(&resource.display_name),
                                 None,
+                                true,
                             ));
                         }
                     }
@@ -289,20 +433,64 @@ impl PlatformAdapter for RailwayClient {
     }
 
     async fn discover(&self) -> Result<Vec<DiscoveredResource>, PulsosError> {
-        // First get teams (workspaces)
-        let teams_data: TeamsData = self
-            .execute_query(TEAMS_QUERY, serde_json::json!({}))
+        let mut workspace_names: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut resources = Vec::new();
+        let projects_data: ProjectsData = self
+            .execute_query(PROJECTS_QUERY, serde_json::json!({}))
             .await?;
 
-        let mut resources = Vec::new();
+        // Some account tokens return an empty top-level `projects` list but allow
+        // project access through `workspace(workspaceId: ...).projects`.
+        if projects_data.projects.edges.is_empty() {
+            if let Ok(me_data) = self
+                .execute_query::<MeData>(ME_QUERY, serde_json::json!({}))
+                .await
+            {
+                if let Ok(workspace_projects) = self
+                    .execute_query::<WorkspaceProjectsData>(
+                        WORKSPACE_PROJECTS_QUERY,
+                        serde_json::json!({ "workspaceId": me_data.me.id }),
+                    )
+                    .await
+                {
+                    if let Some(workspace) = workspace_projects.workspace {
+                        for proj_edge in &workspace.projects.edges {
+                            let proj = &proj_edge.node;
+                            let services: Vec<_> =
+                                proj.services.edges.iter().map(|s| &s.node).collect();
+                            let environments: Vec<_> =
+                                proj.environments.edges.iter().map(|e| &e.node).collect();
 
-        for team_edge in &teams_data.teams.edges {
-            let team = &team_edge.node;
+                            if services.is_empty() || environments.is_empty() {
+                                continue;
+                            }
 
-            let projects_data: ProjectsData = self
-                .execute_query(PROJECTS_QUERY, serde_json::json!({ "teamId": team.id }))
-                .await?;
+                            for service in &services {
+                                for environment in &environments {
+                                    resources.push(DiscoveredResource {
+                                        platform_id: format!(
+                                            "{}:{}:{}",
+                                            proj.id, service.id, environment.id
+                                        ),
+                                        display_name: format!(
+                                            "{} / {} / {}",
+                                            proj.name, service.name, environment.name
+                                        ),
+                                        group: workspace.name.clone(),
+                                        group_type: "workspace".into(),
+                                        archived: false,
+                                        disabled: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
+        if resources.is_empty() {
             for proj_edge in &projects_data.projects.edges {
                 let proj = &proj_edge.node;
                 let services: Vec<_> = proj.services.edges.iter().map(|s| &s.node).collect();
@@ -318,6 +506,35 @@ impl PlatformAdapter for RailwayClient {
                     continue;
                 }
 
+                let workspace_name = if let Some(workspace) = proj.workspace.as_ref() {
+                    workspace.name.clone()
+                } else if let Some(workspace_id) = proj.workspace_id.as_ref() {
+                    if let Some(name) = workspace_names.get(workspace_id) {
+                        name.clone()
+                    } else {
+                        let query_result: Result<WorkspaceData, PulsosError> = self
+                            .execute_query(
+                                WORKSPACE_QUERY,
+                                serde_json::json!({ "workspaceId": workspace_id }),
+                            )
+                            .await;
+                        match query_result {
+                            Ok(data) => {
+                                let name = data
+                                    .workspace
+                                    .as_ref()
+                                    .map(|w| w.name.clone())
+                                    .unwrap_or_else(|| workspace_id.clone());
+                                workspace_names.insert(workspace_id.clone(), name.clone());
+                                name
+                            }
+                            Err(_) => workspace_id.clone(),
+                        }
+                    }
+                } else {
+                    "default".to_string()
+                };
+
                 for service in &services {
                     for environment in &environments {
                         resources.push(DiscoveredResource {
@@ -326,7 +543,7 @@ impl PlatformAdapter for RailwayClient {
                                 "{} / {} / {}",
                                 proj.name, service.name, environment.name
                             ),
-                            group: team.name.clone(),
+                            group: workspace_name.clone(),
                             group_type: "workspace".into(),
                             archived: false,
                             disabled: false,
@@ -336,24 +553,61 @@ impl PlatformAdapter for RailwayClient {
             }
         }
 
+        if resources.iter().any(|r| r.group == "default") {
+            match self.discover_legacy_by_teams().await {
+                Ok(legacy) if !legacy.is_empty() => return Ok(legacy),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::debug!(error = %e, "Railway legacy team discovery fallback failed");
+                }
+            }
+        }
+
         Ok(resources)
     }
 
     async fn validate_auth(&self) -> Result<AuthStatus, PulsosError> {
-        let me_data: MeData = self.execute_query(ME_QUERY, serde_json::json!({})).await?;
+        match self
+            .execute_query::<MeData>(ME_QUERY, serde_json::json!({}))
+            .await
+        {
+            Ok(me_data) => {
+                let identity = me_data
+                    .me
+                    .email
+                    .unwrap_or_else(|| me_data.me.name.unwrap_or(me_data.me.id));
 
-        let identity = me_data
-            .me
-            .email
-            .unwrap_or_else(|| me_data.me.name.unwrap_or(me_data.me.id));
+                Ok(AuthStatus {
+                    valid: true,
+                    identity,
+                    scopes: vec!["account".into()],
+                    expires_at: None,
+                    warnings: vec![],
+                })
+            }
+            Err(me_err) => {
+                // Some Railway token types cannot query `me` but still access projects.
+                // Accept these tokens with a warning so discovery/status can proceed.
+                let projects_result: Result<ProjectsData, PulsosError> = self
+                    .execute_query(PROJECTS_QUERY, serde_json::json!({}))
+                    .await;
 
-        Ok(AuthStatus {
-            valid: true,
-            identity,
-            scopes: vec!["account".into()],
-            expires_at: None,
-            warnings: vec![],
-        })
+                match projects_result {
+                    Ok(_) => Ok(AuthStatus {
+                        valid: true,
+                        identity: "railway (project/workspace token)".to_string(),
+                        scopes: vec!["project".into()],
+                        expires_at: None,
+                        warnings: vec![format!(
+                            "Token cannot query `me` ({}). This is likely a Project/Workspace token. \
+Use an Account token for full API access: https://railway.com/account/tokens",
+                            me_err
+                        )],
+                    }),
+                    Err(_) => Err(me_err),
+                }
+            }
+        }
     }
 
     async fn rate_limit_status(&self) -> Result<RateLimitInfo, PulsosError> {

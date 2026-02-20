@@ -1,6 +1,7 @@
 //! TUI event types — the messages flowing through the event loop.
 
 use crossterm::event::KeyEvent;
+use crate::tui::actions::ActionResult;
 
 /// Events processed by the main TUI loop.
 pub enum AppEvent {
@@ -10,4 +11,6 @@ pub enum AppEvent {
     Tick,
     /// Terminal was resized.
     Resize(u16, u16),
+    /// Asynchronous Settings/Auth action result.
+    ActionResult(ActionResult),
 }

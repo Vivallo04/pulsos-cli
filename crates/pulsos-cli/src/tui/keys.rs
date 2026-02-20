@@ -2,7 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::actions::ActionRequest;
 use super::app::{App, InputMode, Tab};
+use super::settings_flow::SettingsFlowState;
 
 /// Process a key event and mutate the App state accordingly.
 pub fn handle_key(app: &mut App, key: KeyEvent) {
@@ -13,6 +15,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent) {
+    if app.active_tab == Tab::Settings && handle_settings_mode(app, key) {
+        return;
+    }
+
     match key.code {
         // Quit
         KeyCode::Char('q') => app.should_quit = true,
@@ -49,6 +55,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             app.selected_row = 0;
             app.clamp_selection();
         }
+        KeyCode::Char('4') => {
+            app.active_tab = Tab::Settings;
+            app.selected_row = 0;
+            app.clamp_selection();
+        }
 
         // Tab cycling
         KeyCode::Tab => {
@@ -74,6 +85,189 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         }
 
         _ => {}
+    }
+}
+
+fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
+    match app.settings_flow {
+        SettingsFlowState::TokenEntry => {
+            match key.code {
+                KeyCode::Esc => {
+                    app.settings_flow = SettingsFlowState::Idle;
+                    app.token_input.clear();
+                }
+                KeyCode::Enter => {
+                    let platform = app.selected_settings_platform();
+                    let token = app.token_input.trim().to_string();
+                    if token.is_empty() {
+                        app.settings_message = Some("token cannot be empty".to_string());
+                    } else {
+                        app.queue_action(
+                            ActionRequest::ValidateAndStoreToken { platform, token },
+                            SettingsFlowState::ValidatingToken,
+                        );
+                    }
+                }
+                KeyCode::Backspace => {
+                    app.token_input.pop();
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    app.token_input.push(c);
+                }
+                _ => {}
+            }
+            return true;
+        }
+        SettingsFlowState::ProviderActions => {
+            match key.code {
+                KeyCode::Esc => {
+                    app.settings_flow = SettingsFlowState::Idle;
+                    app.onboarding.reset();
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.onboarding.platform_cursor =
+                        (app.onboarding.platform_cursor + 1).min(2);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    if app.onboarding.platform_cursor > 0 {
+                        app.onboarding.platform_cursor -= 1;
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    let idx = app.onboarding.platform_cursor.min(2);
+                    app.onboarding.platform_selected[idx] = !app.onboarding.platform_selected[idx];
+                }
+                KeyCode::Enter => {
+                    let platforms = app.onboarding.selected_platforms();
+                    if platforms.is_empty() {
+                        app.settings_message = Some("select at least one provider".to_string());
+                    } else {
+                        app.queue_action(
+                            ActionRequest::Discover { platforms },
+                            SettingsFlowState::DiscoveryScanning,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            return true;
+        }
+        SettingsFlowState::ResourceSelection => {
+            match key.code {
+                KeyCode::Esc => {
+                    app.settings_flow = SettingsFlowState::Idle;
+                    app.onboarding.reset();
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.onboarding.resource_cursor = app.onboarding.resource_cursor.saturating_add(1);
+                    app.onboarding.clamp_resource_cursor();
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.onboarding.resource_cursor = app.onboarding.resource_cursor.saturating_sub(1);
+                }
+                KeyCode::Char(' ') => {
+                    app.onboarding.toggle_resource(app.onboarding.resource_cursor);
+                }
+                KeyCode::Enter => {
+                    if app.onboarding.selected_count() == 0 {
+                        app.settings_message = Some("select at least one resource".to_string());
+                    } else {
+                        app.queue_action(
+                            ActionRequest::BuildCorrelationPreview {
+                                discovery: app.onboarding.selected_discovery(),
+                            },
+                            SettingsFlowState::Applying,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            return true;
+        }
+        SettingsFlowState::CorrelationReview => {
+            match key.code {
+                KeyCode::Esc => app.settings_flow = SettingsFlowState::ResourceSelection,
+                KeyCode::Enter => {
+                    app.queue_action(
+                        ActionRequest::ApplyCorrelations {
+                            discovery: app.onboarding.selected_discovery(),
+                        },
+                        SettingsFlowState::Applying,
+                    );
+                }
+                _ => {}
+            }
+            return true;
+        }
+        SettingsFlowState::ValidatingToken
+        | SettingsFlowState::DiscoveryScanning
+        | SettingsFlowState::Applying => {
+            return true;
+        }
+        SettingsFlowState::ValidationResult | SettingsFlowState::Idle => {}
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            app.settings_flow = SettingsFlowState::Idle;
+            app.onboarding.reset();
+            true
+        }
+        KeyCode::Enter => {
+            app.settings_flow = SettingsFlowState::ProviderActions;
+            app.onboarding.reset();
+            true
+        }
+        KeyCode::Char('t') => {
+            if app.selected_token_from_env() {
+                app.settings_message = Some(
+                    "env token is active; unset env var or press T to store override".to_string(),
+                );
+            } else {
+                app.settings_flow = SettingsFlowState::TokenEntry;
+                app.token_input.clear();
+            }
+            true
+        }
+        KeyCode::Char('T') => {
+            app.settings_flow = SettingsFlowState::TokenEntry;
+            app.token_input.clear();
+            if app.selected_token_from_env() {
+                app.settings_message = Some(
+                    "stored override can be saved; env token stays active until unset".to_string(),
+                );
+            }
+            true
+        }
+        KeyCode::Char('x') => {
+            if app.selected_token_from_env() {
+                app.settings_message = Some("cannot remove env token; unset it in shell".to_string());
+                return true;
+            }
+            let platform = app.selected_settings_platform();
+            app.queue_action(
+                ActionRequest::RemoveToken { platform },
+                SettingsFlowState::Applying,
+            );
+            true
+        }
+        KeyCode::Char('v') => {
+            let platform = app.selected_settings_platform();
+            app.queue_action(
+                ActionRequest::ValidatePlatform { platform },
+                SettingsFlowState::Applying,
+            );
+            true
+        }
+        KeyCode::Char('o') => {
+            app.settings_flow = SettingsFlowState::ProviderActions;
+            app.onboarding.reset();
+            true
+        }
+        _ => false,
     }
 }
 
@@ -108,9 +302,14 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::actions::ActionRequest;
     use crate::tui::app::{DataSnapshot, InputMode, Tab};
+    use crate::tui::settings_flow::SettingsFlowState;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use chrono::Utc;
+    use pulsos_core::auth::PlatformKind;
     use pulsos_core::config::types::TuiConfig;
+    use pulsos_core::health::{PlatformHealthDetails, PlatformHealthReport, PlatformHealthState};
 
     fn make_key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -139,6 +338,38 @@ mod tests {
             ("proj-c".into(), 10),
         ];
         App::new(data, TuiConfig::default())
+    }
+
+    fn settings_app() -> App {
+        let mut data = DataSnapshot::default();
+        data.platform_health = vec![PlatformHealthReport {
+            platform: PlatformKind::GitHub,
+            state: PlatformHealthState::NoToken,
+            reason: "no token".into(),
+            next_action: "set token".into(),
+            token_source: None,
+            last_checked_at: Utc::now(),
+            details: PlatformHealthDetails::None,
+        }];
+        let mut app = App::new(data, TuiConfig::default());
+        app.active_tab = Tab::Settings;
+        app
+    }
+
+    fn env_settings_app() -> App {
+        let mut data = DataSnapshot::default();
+        data.platform_health = vec![PlatformHealthReport {
+            platform: PlatformKind::GitHub,
+            state: PlatformHealthState::Ready,
+            reason: "env token".into(),
+            next_action: "none".into(),
+            token_source: Some("GITHUB_TOKEN".into()),
+            last_checked_at: Utc::now(),
+            details: PlatformHealthDetails::None,
+        }];
+        let mut app = App::new(data, TuiConfig::default());
+        app.active_tab = Tab::Settings;
+        app
     }
 
     #[test]
@@ -207,6 +438,9 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Char('3')));
         assert_eq!(app.active_tab, Tab::Health);
 
+        handle_key(&mut app, make_key(KeyCode::Char('4')));
+        assert_eq!(app.active_tab, Tab::Settings);
+
         handle_key(&mut app, make_key(KeyCode::Char('1')));
         assert_eq!(app.active_tab, Tab::Unified);
     }
@@ -229,6 +463,8 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.active_tab, Tab::Health);
         handle_key(&mut app, make_key(KeyCode::Tab));
+        assert_eq!(app.active_tab, Tab::Settings);
+        handle_key(&mut app, make_key(KeyCode::Tab));
         assert_eq!(app.active_tab, Tab::Unified);
     }
 
@@ -236,6 +472,8 @@ mod tests {
     fn cycle_tabs_backward_with_backtab() {
         let mut app = test_app();
         assert_eq!(app.active_tab, Tab::Unified);
+        handle_key(&mut app, make_key(KeyCode::BackTab));
+        assert_eq!(app.active_tab, Tab::Settings);
         handle_key(&mut app, make_key(KeyCode::BackTab));
         assert_eq!(app.active_tab, Tab::Health);
         handle_key(&mut app, make_key(KeyCode::BackTab));
@@ -292,5 +530,88 @@ mod tests {
         handle_key(&mut app, make_key(KeyCode::Enter));
         assert_eq!(app.input_mode, InputMode::Normal);
         assert_eq!(app.search_query, "prod"); // kept for filtering
+    }
+
+    #[test]
+    fn settings_token_entry_queues_store_action() {
+        let mut app = settings_app();
+        handle_key(&mut app, make_key(KeyCode::Char('t')));
+        assert_eq!(app.settings_flow, SettingsFlowState::TokenEntry);
+
+        handle_key(&mut app, make_key(KeyCode::Char('a')));
+        handle_key(&mut app, make_key(KeyCode::Char('b')));
+        handle_key(&mut app, make_key(KeyCode::Char('c')));
+        handle_key(&mut app, make_key(KeyCode::Enter));
+
+        assert_eq!(app.settings_flow, SettingsFlowState::ValidatingToken);
+        match app.pending_action.take() {
+            Some(ActionRequest::ValidateAndStoreToken { platform, token }) => {
+                assert_eq!(platform, PlatformKind::GitHub);
+                assert_eq!(token, "abc");
+            }
+            other => panic!("unexpected action queued: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settings_onboarding_discovery_requires_selection() {
+        let mut app = settings_app();
+        handle_key(&mut app, make_key(KeyCode::Char('o')));
+        assert_eq!(app.settings_flow, SettingsFlowState::ProviderActions);
+
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert!(app.pending_action.is_none());
+
+        handle_key(&mut app, make_key(KeyCode::Char(' ')));
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        match app.pending_action.take() {
+            Some(ActionRequest::Discover { platforms }) => {
+                assert_eq!(platforms, vec![PlatformKind::GitHub]);
+            }
+            other => panic!("unexpected action queued: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settings_messages_use_normalized_validation_copy() {
+        let mut app = settings_app();
+        handle_key(&mut app, make_key(KeyCode::Char('t')));
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(
+            app.settings_message.as_deref(),
+            Some("token cannot be empty")
+        );
+
+        app.settings_flow = SettingsFlowState::ProviderActions;
+        app.onboarding.reset();
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(
+            app.settings_message.as_deref(),
+            Some("select at least one provider")
+        );
+
+        app.settings_flow = SettingsFlowState::ResourceSelection;
+        app.onboarding.reset();
+        handle_key(&mut app, make_key(KeyCode::Enter));
+        assert_eq!(
+            app.settings_message.as_deref(),
+            Some("select at least one resource")
+        );
+    }
+
+    #[test]
+    fn settings_messages_explain_env_token_limits() {
+        let mut app = env_settings_app();
+        handle_key(&mut app, make_key(KeyCode::Char('t')));
+        assert_eq!(
+            app.settings_message.as_deref(),
+            Some("env token is active; unset env var or press T to store override")
+        );
+
+        handle_key(&mut app, make_key(KeyCode::Char('x')));
+        assert_eq!(
+            app.settings_message.as_deref(),
+            Some("cannot remove env token; unset it in shell")
+        );
     }
 }

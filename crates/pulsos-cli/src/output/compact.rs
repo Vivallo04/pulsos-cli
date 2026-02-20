@@ -1,82 +1,84 @@
-use chrono::Utc;
 use pulsos_core::domain::deployment::DeploymentStatus;
-use pulsos_core::domain::project::{Confidence, CorrelatedEvent};
+use pulsos_core::domain::project::CorrelatedEvent;
+use std::io::IsTerminal;
 
+/// Render correlated events in compact single-line format (§4.28):
+///
+/// ```text
+/// my-saas       ✓ ✓ ✓   98
+/// api-core      ✓ ✓ —   95
+/// auth-service  ✗ ✓ —   62
+/// ```
 pub fn render_correlated(events: &[CorrelatedEvent]) {
     if events.is_empty() {
         println!("No deployment events found.");
         return;
     }
 
+    let colored = std::io::stdout().is_terminal() && std::env::var("NO_COLOR").is_err();
+
     for c in events {
-        let conf = match c.confidence {
-            Confidence::Exact => "EXACT",
-            Confidence::High => " HIGH",
-            Confidence::Low => "  LOW",
-            Confidence::Unmatched => "    ?",
-        };
-
-        let sha = c
-            .commit_sha
-            .as_deref()
-            .map(|s| if s.len() > 7 { &s[..7] } else { s })
-            .unwrap_or("-------");
-
-        let gh = c
-            .github
-            .as_ref()
-            .map(|e| status_compact(&e.status))
-            .unwrap_or("--");
-
-        let rw = c
-            .railway
-            .as_ref()
-            .map(|e| status_compact(&e.status))
-            .unwrap_or("--");
-
-        let vc = c
+        // Project name
+        let name_raw = c
             .vercel
             .as_ref()
-            .map(|e| status_compact(&e.status))
-            .unwrap_or("--");
-
-        let branch = c
-            .github
-            .as_ref()
-            .and_then(|e| e.branch.as_deref())
-            .or_else(|| c.vercel.as_ref().and_then(|e| e.branch.as_deref()))
+            .and_then(|e| e.title.as_deref())
+            .or_else(|| c.railway.as_ref().and_then(|e| e.title.as_deref()))
+            .or_else(|| c.github.as_ref().and_then(|e| e.title.as_deref()))
+            .or_else(|| {
+                c.commit_sha
+                    .as_deref()
+                    .map(|s| if s.len() > 8 { &s[..8] } else { s })
+            })
             .unwrap_or("-");
 
-        let age = format_age_compact(c.timestamp);
+        let gh_sym = c
+            .github
+            .as_ref()
+            .map(|e| status_symbol_colored(&e.status, colored))
+            .unwrap_or_else(|| dim_str("—", colored));
 
-        println!("[{conf}] {sha}  GH:{gh}  RW:{rw}  VC:{vc}  {branch}  {age}");
+        let rw_sym = c
+            .railway
+            .as_ref()
+            .map(|e| status_symbol_colored(&e.status, colored))
+            .unwrap_or_else(|| dim_str("—", colored));
+
+        let vc_sym = c
+            .vercel
+            .as_ref()
+            .map(|e| status_symbol_colored(&e.status, colored))
+            .unwrap_or_else(|| dim_str("—", colored));
+
+        // Use a fixed-width name column
+        println!("{:<16}  {} {} {}", name_raw, gh_sym, rw_sym, vc_sym,);
     }
 }
 
-fn status_compact(status: &DeploymentStatus) -> &'static str {
-    match status {
-        DeploymentStatus::Success => "OK",
-        DeploymentStatus::Failed => "FAIL",
-        DeploymentStatus::InProgress => "RUN",
-        DeploymentStatus::Queued => "QUE",
-        DeploymentStatus::Cancelled => "CAN",
-        DeploymentStatus::Skipped => "SKP",
-        DeploymentStatus::ActionRequired => "ACT",
-        DeploymentStatus::Sleeping => "SLP",
-        DeploymentStatus::Unknown(_) => "???",
-    }
-}
-
-fn format_age_compact(created_at: chrono::DateTime<Utc>) -> String {
-    let diff = Utc::now() - created_at;
-    let secs = diff.num_seconds();
-    if secs < 60 {
-        "now".into()
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h", secs / 3600)
+/// Return a colored status symbol string.
+fn status_symbol_colored(status: &DeploymentStatus, colored: bool) -> String {
+    let (sym, code) = match status {
+        DeploymentStatus::Success => ("✓", "\x1b[38;2;52;211;153m"),
+        DeploymentStatus::Failed => ("✗", "\x1b[38;2;248;113;113m"),
+        DeploymentStatus::InProgress => ("◌", "\x1b[38;2;96;165;250m"),
+        DeploymentStatus::Queued => ("⏸", "\x1b[38;2;156;163;175m"),
+        DeploymentStatus::Cancelled => ("—", "\x1b[38;2;156;163;175m"),
+        DeploymentStatus::Skipped => ("—", "\x1b[38;2;156;163;175m"),
+        DeploymentStatus::ActionRequired => ("⚠", "\x1b[38;2;251;191;36m"),
+        DeploymentStatus::Sleeping => ("●", "\x1b[38;2;156;163;175m"),
+        DeploymentStatus::Unknown(_) => ("?", "\x1b[38;2;156;163;175m"),
+    };
+    if colored {
+        format!("{code}{sym}\x1b[0m")
     } else {
-        format!("{}d", secs / 86400)
+        sym.to_string()
+    }
+}
+
+fn dim_str(s: &str, colored: bool) -> String {
+    if colored {
+        format!("\x1b[38;2;85;85;85m{s}\x1b[0m")
+    } else {
+        s.to_string()
     }
 }

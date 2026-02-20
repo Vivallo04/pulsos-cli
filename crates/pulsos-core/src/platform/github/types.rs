@@ -182,6 +182,12 @@ pub struct GhUser {
     pub name: Option<String>,
 }
 
+/// GET /repos/{owner}/{repo}/collaborators/{user}/permission
+#[derive(Debug, Deserialize)]
+pub struct GhCollaboratorPermission {
+    pub permission: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

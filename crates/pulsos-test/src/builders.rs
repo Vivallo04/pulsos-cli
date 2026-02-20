@@ -22,6 +22,7 @@ impl EventBuilder {
                 duration_secs: None,
                 url: None,
                 metadata: EventMetadata::default(),
+                is_from_cache: false,
             },
         }
     }

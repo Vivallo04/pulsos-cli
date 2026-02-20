@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use tokio::sync::watch;
 
-use pulsos_core::auth::credential_store::KeyringStore;
+use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
 use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
@@ -23,12 +23,21 @@ use pulsos_core::config::types::{CorrelationConfig, PulsosConfig};
 use pulsos_core::correlation;
 use pulsos_core::domain::deployment::DeploymentEvent;
 use pulsos_core::domain::health;
+use pulsos_core::health::{check_all_platforms_health, PlatformHealthReport};
 use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::railway::client::RailwayClient;
 use pulsos_core::platform::vercel::client::VercelClient;
 use pulsos_core::platform::{PlatformAdapter, TrackedResource};
+use pulsos_core::scheduler::budget::RateLimitBudget;
+use pulsos_core::scheduler::poller::{stagger, BATCH_DELAY_SECS, BATCH_SIZE};
 
 use super::app::DataSnapshot;
+
+#[derive(Debug, Clone)]
+pub enum PollerCommand {
+    ForceRefresh,
+    ReplaceConfig(PulsosConfig),
+}
 
 /// Maximum number of health history entries per project (for sparklines).
 const HEALTH_HISTORY_CAP: usize = 20;
@@ -37,6 +46,50 @@ const HEALTH_HISTORY_CAP: usize = 20;
 const GITHUB_THROTTLE: Duration = Duration::from_secs(30);
 const RAILWAY_THROTTLE: Duration = Duration::from_secs(15);
 const VERCEL_THROTTLE: Duration = Duration::from_secs(15);
+const HEALTH_THROTTLE: Duration = Duration::from_secs(30);
+
+fn combine_events(
+    github: &[DeploymentEvent],
+    railway: &[DeploymentEvent],
+    vercel: &[DeploymentEvent],
+) -> Vec<DeploymentEvent> {
+    let mut events = Vec::with_capacity(github.len() + railway.len() + vercel.len());
+    events.extend_from_slice(github);
+    events.extend_from_slice(railway);
+    events.extend_from_slice(vercel);
+    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events
+}
+
+async fn wait_for_next_cycle(
+    first_cycle: &mut bool,
+    poll_interval: Duration,
+    command_rx: &mut tokio::sync::mpsc::Receiver<PollerCommand>,
+    config: &mut PulsosConfig,
+    resources: &mut PlatformResources,
+) -> Option<bool> {
+    if *first_cycle {
+        *first_cycle = false;
+        return Some(false);
+    }
+
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(poll_interval) => return Some(false),
+            msg = command_rx.recv() => {
+                match msg {
+                    Some(PollerCommand::ForceRefresh) => return Some(true),
+                    Some(PollerCommand::ReplaceConfig(new_config)) => {
+                        *config = new_config;
+                        *resources = PlatformResources::from_correlations(&config.correlations);
+                        return Some(true);
+                    }
+                    None => return None,
+                }
+            }
+        }
+    }
+}
 
 /// Tracked resources grouped by platform, built from config correlations.
 pub struct PlatformResources {
@@ -90,11 +143,11 @@ impl PlatformResources {
 /// Checks `force_rx` for force-refresh signals from the UI.
 /// Stops when `tx` is closed (all receivers dropped).
 pub async fn run_poller(
-    config: PulsosConfig,
+    mut config: PulsosConfig,
     tx: watch::Sender<DataSnapshot>,
-    mut force_rx: tokio::sync::mpsc::Receiver<()>,
+    mut command_rx: tokio::sync::mpsc::Receiver<PollerCommand>,
 ) {
-    let resources = PlatformResources::from_correlations(&config.correlations);
+    let mut resources = PlatformResources::from_correlations(&config.correlations);
 
     let cache = match CacheStore::open_default() {
         Ok(c) => Arc::new(c),
@@ -104,50 +157,143 @@ pub async fn run_poller(
         }
     };
 
-    let store = Arc::new(KeyringStore::new());
-    let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
+    let store: Arc<dyn CredentialStore> = match FallbackStore::new() {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            tracing::error!("Credential store error: {e}");
+            return;
+        }
+    };
+    let store = store;
 
     let poll_interval = Duration::from_secs(config.tui.refresh_interval.max(1));
+    let mut first_cycle = true;
 
-    let mut last_github = Instant::now() - GITHUB_THROTTLE;
+    // github_throttle starts at the static constant and is updated adaptively each cycle.
+    let mut github_throttle = GITHUB_THROTTLE;
+    let mut last_github = Instant::now() - github_throttle;
     let mut last_railway = Instant::now() - RAILWAY_THROTTLE;
     let mut last_vercel = Instant::now() - VERCEL_THROTTLE;
+    let mut last_github_events: Vec<DeploymentEvent> = Vec::new();
+    let mut last_railway_events: Vec<DeploymentEvent> = Vec::new();
+    let mut last_vercel_events: Vec<DeploymentEvent> = Vec::new();
+    let mut last_cycle_warnings: Vec<String> = Vec::new();
+    let mut last_platform_health: Vec<PlatformHealthReport> = Vec::new();
+    let mut last_cycle_completed_at = Utc::now();
+    let mut last_health_check_at = Instant::now() - HEALTH_THROTTLE;
 
     // Health history ring buffer: project_name → Vec<u8>
     let mut health_history: HashMap<String, Vec<u8>> = HashMap::new();
 
     loop {
-        let force_refresh = tokio::select! {
-            _ = tokio::time::sleep(poll_interval) => false,
-            msg = force_rx.recv() => {
-                match msg {
-                    Some(()) => true,
-                    None => return, // channel closed, UI exited
+        let mut force_refresh = match wait_for_next_cycle(
+            &mut first_cycle,
+            poll_interval,
+            &mut command_rx,
+            &mut config,
+            &mut resources,
+        )
+        .await
+        {
+                Some(v) => v,
+                None => return, // channel closed, UI exited
+            };
+
+        while let Ok(command) = command_rx.try_recv() {
+            match command {
+                PollerCommand::ForceRefresh => force_refresh = true,
+                PollerCommand::ReplaceConfig(new_config) => {
+                    config = new_config;
+                    resources = PlatformResources::from_correlations(&config.correlations);
+                    force_refresh = true;
                 }
             }
-        };
+        }
 
         // Check if tx is closed (all receivers dropped).
         if tx.is_closed() {
             return;
         }
 
+        let cycle_started_at = Utc::now();
+        let pre_events = combine_events(
+            &last_github_events,
+            &last_railway_events,
+            &last_vercel_events,
+        );
+        let pre_correlated = correlation::correlate_all(&config.correlations, &pre_events);
+        let pre_health_scores =
+            health::compute_project_health_scores(&config.correlations, &pre_events);
+        let pre_health_history: Vec<(String, Vec<u8>)> = health_history
+            .iter()
+            .map(|(name, history)| (name.clone(), history.clone()))
+            .collect();
+
+        let syncing_snapshot = DataSnapshot {
+            events: pre_events,
+            correlated: pre_correlated,
+            health_scores: pre_health_scores,
+            health_history: pre_health_history,
+            warnings: last_cycle_warnings.clone(),
+            platform_health: last_platform_health.clone(),
+            is_syncing: true,
+            fetched_at: Utc::now(),
+            last_cycle_started_at: cycle_started_at,
+            last_cycle_completed_at,
+        };
+        if tx.send(syncing_snapshot).is_err() {
+            return;
+        }
+
         let now = Instant::now();
-        let mut all_events: Vec<DeploymentEvent> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
+        let resolver = TokenResolver::new(store.clone(), config.auth.token_detection.clone());
 
         // GitHub
         if !resources.github.is_empty()
-            && (force_refresh || now.duration_since(last_github) >= GITHUB_THROTTLE)
+            && (force_refresh || now.duration_since(last_github) >= github_throttle)
         {
             if let Some(token) = resolver.resolve(&PlatformKind::GitHub) {
                 let client = GitHubClient::new(token, cache.clone());
-                match client.fetch_events(&resources.github).await {
-                    Ok(events) => {
-                        all_events.extend(events);
-                        last_github = now;
+                let mut github_events: Vec<DeploymentEvent> = Vec::new();
+                let mut github_failed = false;
+
+                // Staggered fetch: process repos in batches to avoid burst rate-limit hits.
+                let results = stagger(
+                    &resources.github,
+                    BATCH_SIZE,
+                    BATCH_DELAY_SECS,
+                    |resource| {
+                        let client = &client;
+                        async move { client.fetch_events(std::slice::from_ref(resource)).await }
+                    },
+                )
+                .await;
+
+                for result in results {
+                    match result {
+                        Ok(evts) => github_events.extend(evts),
+                        Err(e) => {
+                            github_failed = true;
+                            warnings.push(format!("GitHub: {}", e.user_message()));
+                        }
                     }
-                    Err(e) => warnings.push(format!("GitHub: {}", e.user_message())),
+                }
+                if !github_failed {
+                    last_github_events = github_events;
+                    last_github = now;
+                }
+
+                // Update adaptive poll interval based on current rate-limit budget.
+                if let Ok(rl_info) = client.rate_limit_status().await {
+                    let budget = RateLimitBudget::from_rate_limit_info(&rl_info);
+                    github_throttle = Duration::from_secs(budget.recommended_interval());
+                    if budget.is_exhausted() {
+                        warnings.push(format!(
+                            "GitHub rate limit exhausted. Showing cached data. Resets in {}s.",
+                            budget.secs_until_reset()
+                        ));
+                    }
                 }
             } else {
                 warnings.push("GitHub: no token available".into());
@@ -162,7 +308,7 @@ pub async fn run_poller(
                 let client = RailwayClient::new(token, cache.clone());
                 match client.fetch_events(&resources.railway).await {
                     Ok(events) => {
-                        all_events.extend(events);
+                        last_railway_events = events;
                         last_railway = now;
                     }
                     Err(e) => warnings.push(format!("Railway: {}", e.user_message())),
@@ -180,7 +326,7 @@ pub async fn run_poller(
                 let client = VercelClient::new(token, cache.clone());
                 match client.fetch_events(&resources.vercel).await {
                     Ok(events) => {
-                        all_events.extend(events);
+                        last_vercel_events = events;
                         last_vercel = now;
                     }
                     Err(e) => warnings.push(format!("Vercel: {}", e.user_message())),
@@ -190,8 +336,16 @@ pub async fn run_poller(
             }
         }
 
-        // Sort events by created_at descending.
-        all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        if force_refresh || now.duration_since(last_health_check_at) >= HEALTH_THROTTLE {
+            last_platform_health = check_all_platforms_health(&config, &resolver, &cache).await;
+            last_health_check_at = now;
+        }
+
+        let all_events = combine_events(
+            &last_github_events,
+            &last_railway_events,
+            &last_vercel_events,
+        );
 
         // Build correlated events using core correlation engine.
         let correlated = correlation::correlate_all(&config.correlations, &all_events);
@@ -214,14 +368,21 @@ pub async fn run_poller(
             .map(|(name, history)| (name.clone(), history.clone()))
             .collect();
 
+        let cycle_completed_at = Utc::now();
         let snapshot = DataSnapshot {
             events: all_events,
             correlated,
             health_scores,
             health_history: health_history_snapshot,
-            warnings,
-            fetched_at: Utc::now(),
+            warnings: warnings.clone(),
+            platform_health: last_platform_health.clone(),
+            is_syncing: false,
+            fetched_at: cycle_completed_at,
+            last_cycle_started_at: cycle_started_at,
+            last_cycle_completed_at: cycle_completed_at,
         };
+        last_cycle_warnings = warnings;
+        last_cycle_completed_at = cycle_completed_at;
 
         // Send snapshot. If send fails, all receivers are gone — exit.
         if tx.send(snapshot).is_err() {
@@ -233,6 +394,8 @@ pub async fn run_poller(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Duration as ChronoDuration, Utc};
+    use pulsos_core::domain::deployment::{DeploymentStatus, EventMetadata, Platform};
 
     #[test]
     fn platform_resources_from_correlations() {
@@ -287,5 +450,72 @@ mod tests {
         // Should contain the last 20 entries: 5..25
         assert_eq!(entry[0], 5);
         assert_eq!(entry[19], 24);
+    }
+
+    fn test_event(id: &str, platform: Platform, seconds_ago: i64) -> DeploymentEvent {
+        let ts = Utc::now() - ChronoDuration::seconds(seconds_ago);
+        DeploymentEvent {
+            id: id.to_string(),
+            platform,
+            status: DeploymentStatus::Success,
+            commit_sha: None,
+            branch: None,
+            title: Some(id.to_string()),
+            actor: None,
+            created_at: ts,
+            updated_at: Some(ts),
+            duration_secs: None,
+            url: None,
+            metadata: EventMetadata::default(),
+            is_from_cache: false,
+        }
+    }
+
+    #[test]
+    fn combine_events_keeps_data_from_all_platform_caches() {
+        let gh = vec![test_event("gh1", Platform::GitHub, 10)];
+        let rw = vec![test_event("rw1", Platform::Railway, 5)];
+        let vc = vec![test_event("vc1", Platform::Vercel, 1)];
+
+        let combined = combine_events(&gh, &rw, &vc);
+        assert_eq!(combined.len(), 3);
+        assert_eq!(combined[0].id, "vc1");
+        assert_eq!(combined[1].id, "rw1");
+        assert_eq!(combined[2].id, "gh1");
+    }
+
+    #[test]
+    fn combine_events_preserves_previous_platform_data_when_others_update() {
+        let gh_cached = vec![test_event("gh_cached", Platform::GitHub, 20)];
+        let rw_new = vec![test_event("rw_new", Platform::Railway, 1)];
+
+        let combined = combine_events(&gh_cached, &rw_new, &[]);
+        assert_eq!(combined.len(), 2);
+        assert!(combined.iter().any(|e| e.id == "gh_cached"));
+        assert!(combined.iter().any(|e| e.id == "rw_new"));
+    }
+
+    #[tokio::test]
+    async fn first_cycle_does_not_wait_for_poll_interval() {
+        let mut first_cycle = true;
+        let poll_interval = Duration::from_secs(60);
+        let (_tx, mut rx) = tokio::sync::mpsc::channel::<PollerCommand>(1);
+        let mut config = PulsosConfig::default();
+        let mut resources = PlatformResources::from_correlations(&config.correlations);
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(1),
+            wait_for_next_cycle(
+                &mut first_cycle,
+                poll_interval,
+                &mut rx,
+                &mut config,
+                &mut resources,
+            ),
+        )
+        .await
+        .expect("first cycle should return immediately");
+
+        assert_eq!(result, Some(false));
     }
 }

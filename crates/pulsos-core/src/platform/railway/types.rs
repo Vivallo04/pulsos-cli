@@ -47,10 +47,36 @@ pub struct ProjectsData {
 pub struct RwProject {
     pub id: String,
     pub name: String,
+    pub workspace_id: Option<String>,
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub workspace: Option<RwWorkspaceRef>,
     pub services: Connection<RwService>,
     pub environments: Connection<RwEnvironment>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RwWorkspaceRef {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceData {
+    pub workspace: Option<RwWorkspaceRef>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceProjectsData {
+    pub workspace: Option<RwWorkspaceProjects>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RwWorkspaceProjects {
+    pub id: String,
+    pub name: String,
+    pub projects: Connection<RwProject>,
 }
 
 #[derive(Debug, Deserialize)]

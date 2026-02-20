@@ -1,6 +1,9 @@
 pub mod auth;
+pub mod config;
 pub mod doctor;
 pub mod doctor_fmt;
 pub mod repos;
 pub mod status;
+pub mod ui;
 pub mod views;
+pub mod wizard;
