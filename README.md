@@ -310,6 +310,12 @@ pulsos completions elvish
 | `r` | Force refresh |
 | `q` / `Ctrl+C` | Quit |
 
+### Logs Tab
+
+| Key | Action |
+|-----|--------|
+| `f` | Cycle log level filter (ALL → ERR → WARN → INFO → ALL) |
+
 ### Settings Tab
 
 | Key | Action |
@@ -327,22 +333,25 @@ pulsos-cli/
 ├── crates/
 │   ├── pulsos-core/          # Library crate
 │   │   └── src/
-│   │       ├── platform/     # GitHub, Railway, Vercel API clients
+│   │       ├── platform/     # GitHub, Railway, Vercel API clients + retry helper
 │   │       ├── correlation/  # Event matching engine (SHA + timestamp heuristic)
 │   │       ├── domain/       # DeploymentEvent, CorrelatedEvent, health scoring
-│   │       ├── auth/         # Credential resolution, keyring, file store
+│   │       ├── auth/         # Credential resolution, keyring, file store, FallbackStore
 │   │       ├── config/       # TOML config loading and saving
 │   │       ├── cache/        # sled-based ETag cache
-│   │       ├── health/       # Platform health checks
+│   │       ├── health/       # Platform health checks (PlatformHealthReport)
 │   │       ├── scheduler/    # Polling budget and adaptive scheduler
-│   │       └── sync/         # Auto-correlation builder
+│   │       └── sync/         # Auto-correlation builder (build_correlations, merge)
 │   ├── pulsos-cli/           # Binary crate
 │   │   └── src/
-│   │       ├── main.rs       # CLI entry point (clap)
-│   │       ├── commands/     # Command handlers (status, auth, repos, views, config, doctor)
-│   │       ├── tui/          # ratatui TUI (poll, render, keys, widgets, settings flow)
+│   │       ├── main.rs       # CLI entry point (clap), logging init (ring buffer + stderr)
+│   │       ├── commands/     # Command handlers: status, auth, repos, views, config, doctor
+│   │       │   ├── wizard.rs # First-run config wizard (auth + discovery + re-check)
+│   │       │   └── ui/       # Full-screen interactive prompt layer (ScreenSession)
+│   │       ├── tui/          # ratatui live TUI (5 tabs: Unified, Platform, Health, Settings, Logs)
+│   │       │   └── widgets/  # Per-tab rendering components + log_buffer, settings_flow
 │   │       └── output/       # Table, compact, JSON formatters
-│   └── pulsos-test/          # Test helpers and builders
+│   └── pulsos-test/          # Test helpers and builders (EventBuilder)
 └── Cargo.toml                # Workspace root
 ```
 
@@ -382,3 +391,7 @@ cargo run --bin pulsos -- doctor
 ## License
 
 MIT
+
+---
+
+Last Updated: 2026-02-22
