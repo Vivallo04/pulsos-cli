@@ -12,6 +12,7 @@ use pulsos_core::domain::health::HealthBreakdown;
 use pulsos_core::domain::metrics::ProjectTelemetry;
 use pulsos_core::domain::project::CorrelatedEvent;
 use pulsos_core::health::PlatformHealthReport;
+use serde::{Deserialize, Serialize};
 
 use super::actions::{ActionRequest, ActionResult};
 use super::log_buffer::LogRingBuffer;
@@ -168,7 +169,7 @@ pub struct ActionOutcome {
 ///
 /// Produced by the background poller and consumed by the renderer.
 /// Intentionally `Clone` — data volumes are small (tens of events).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataSnapshot {
     /// Raw events from all platforms.
     pub events: Vec<DeploymentEvent>,

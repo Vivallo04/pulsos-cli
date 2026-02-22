@@ -1,10 +1,13 @@
 mod commands;
+mod daemon;
 mod output;
 mod tui;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use output::OutputFormat;
 use std::path::PathBuf;
+
+use commands::daemon::{DaemonAction, DaemonArgs};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -48,6 +51,8 @@ enum Commands {
     Config(commands::config::ConfigArgs),
     /// Diagnostics and troubleshooting
     Doctor(commands::doctor::DoctorArgs),
+    /// Run a persistent background daemon with a native tray icon
+    Daemon(DaemonArgs),
     /// Generate shell completion scripts
     Completions {
         /// Shell to generate completions for (bash, zsh, fish, powershell, elvish)
@@ -56,10 +61,40 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() {
+// ──────────────────────────────────────────────────────────────────────────────
+// Entry point — intentionally NOT #[tokio::main] so that `daemon run` can own
+// the OS main thread (required by macOS for the tray event loop).
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn main() {
     let cli = Cli::parse();
 
+    // `daemon run` must own the main thread for the tray icon event loop.
+    // Intercept it before starting the Tokio runtime.
+    if let Some(Commands::Daemon(DaemonArgs { action: DaemonAction::Run })) = &cli.command {
+        let config_path = cli.config.as_deref();
+        let config = load_config_sync(config_path);
+        if let Err(e) = commands::daemon::run_daemon_main_thread(config) {
+            eprintln!("daemon error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // All other subcommands use a normal multi-thread Tokio runtime.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime")
+        .block_on(async_main(cli));
+}
+
+/// Load config synchronously (used before the async runtime is started).
+fn load_config_sync(config_path: Option<&std::path::Path>) -> pulsos_core::config::types::PulsosConfig {
+    pulsos_core::config::load_config(config_path).unwrap_or_default()
+}
+
+async fn async_main(cli: Cli) {
     // Initialize tracing with dual writer (ring buffer + conditional stderr).
     let filter = if cli.verbose {
         tracing_subscriber::EnvFilter::new("pulsos=debug")
@@ -94,6 +129,7 @@ async fn main() {
         Some(Commands::Views(args)) => commands::views::execute(args, config_path).await,
         Some(Commands::Config(args)) => commands::config::execute(args, config_path).await,
         Some(Commands::Doctor(args)) => commands::doctor::execute(args, config_path).await,
+        Some(Commands::Daemon(args)) => commands::daemon::execute(args, config_path).await,
         Some(Commands::Completions { shell }) => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "pulsos", &mut std::io::stdout());

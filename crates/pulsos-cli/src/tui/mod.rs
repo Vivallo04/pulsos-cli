@@ -77,10 +77,10 @@ pub async fn run_tui(
     let (action_req_tx, action_req_rx) = mpsc::channel::<ActionRequest>(8);
     let (action_result_tx, mut action_result_rx) = mpsc::channel::<ActionResult>(8);
 
-    // Spawn the background data poller.
+    // Spawn the background data poller (or connect to daemon if running).
     let poller_config = config.clone();
     tokio::spawn(async move {
-        poll::run_poller(poller_config, data_tx, poller_rx).await;
+        poll::run_poller_or_daemon_client(poller_config, data_tx, poller_rx).await;
     });
 
     // Spawn settings action worker.

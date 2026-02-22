@@ -7,12 +7,16 @@
 //! - Builds correlated events by grouping on commit_sha
 //! - Computes health scores via `HealthCalculator`
 //! - Maintains a ring buffer of health history for sparklines
+//!
+//! When a daemon is running locally, `run_poller_or_daemon_client` connects to
+//! the SSE stream instead of polling platform APIs directly.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
+use futures_util::StreamExt as _;
 use tokio::sync::watch;
 
 use pulsos_core::analytics::dora::DoraCalculator;
@@ -491,6 +495,68 @@ pub async fn run_poller(
             return;
         }
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Daemon-client mode
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Reads the daemon port from `~/.config/pulsos/daemon.port`.
+fn read_daemon_port() -> Option<u16> {
+    let path = dirs::config_dir()?.join("pulsos").join("daemon.port");
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// Returns `true` if the daemon's `/health` endpoint responds successfully.
+async fn ping_daemon(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{port}/health");
+    reqwest::get(&url)
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// Streams `DataSnapshot` updates from a running daemon's SSE endpoint.
+///
+/// Exits when the SSE connection is dropped or the watch channel is closed.
+async fn stream_from_daemon(port: u16, tx: watch::Sender<DataSnapshot>) {
+    use crate::daemon::server::DaemonStateEvent;
+
+    let url = format!("http://127.0.0.1:{port}/api/stream");
+    let Ok(resp) = reqwest::get(&url).await else { return };
+    let mut stream = resp.bytes_stream();
+
+    while let Some(Ok(chunk)) = stream.next().await {
+        if tx.is_closed() {
+            return;
+        }
+        // SSE data lines look like: "data: <json>\n\n"
+        for line in chunk.split(|&b| b == b'\n') {
+            if let Some(json) = line.strip_prefix(b"data: ") {
+                if let Ok(ev) = serde_json::from_slice::<DaemonStateEvent>(json) {
+                    let _ = tx.send(ev.snapshot);
+                }
+            }
+        }
+    }
+}
+
+/// Transparent wrapper: connects to the daemon if one is running,
+/// otherwise falls back to direct polling.
+pub async fn run_poller_or_daemon_client(
+    config: PulsosConfig,
+    tx: watch::Sender<DataSnapshot>,
+    command_rx: tokio::sync::mpsc::Receiver<PollerCommand>,
+) {
+    if let Some(port) = read_daemon_port() {
+        if ping_daemon(port).await {
+            tracing::info!("connecting to local daemon on port {port}");
+            stream_from_daemon(port, tx).await;
+            return;
+        }
+    }
+    // No daemon — poll platform APIs directly.
+    run_poller(config, tx, command_rx).await;
 }
 
 #[cfg(test)]

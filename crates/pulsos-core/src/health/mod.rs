@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::auth::resolve::TokenResolver;
 use crate::auth::PlatformKind;
@@ -15,7 +16,7 @@ use crate::platform::railway::client::RailwayClient;
 use crate::platform::vercel::client::VercelClient;
 use crate::platform::PlatformAdapter;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlatformHealthState {
     NoToken,
     InvalidToken,
@@ -46,7 +47,7 @@ impl PlatformHealthState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitHubHealthDetails {
     pub identity: Option<String>,
     pub scopes: Vec<String>,
@@ -61,7 +62,7 @@ pub struct GitHubHealthDetails {
     pub inaccessible_orgs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RailwayHealthDetails {
     pub identity: Option<String>,
     pub configured_workspace_checks: usize,
@@ -72,7 +73,7 @@ pub struct RailwayHealthDetails {
     pub inaccessible_projects: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VercelHealthDetails {
     pub identity: Option<String>,
     pub configured_team_checks: usize,
@@ -83,7 +84,7 @@ pub struct VercelHealthDetails {
     pub inaccessible_projects: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlatformHealthDetails {
     GitHub(GitHubHealthDetails),
     Railway(RailwayHealthDetails),
@@ -91,7 +92,7 @@ pub enum PlatformHealthDetails {
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformHealthReport {
     pub platform: PlatformKind,
     pub state: PlatformHealthState,

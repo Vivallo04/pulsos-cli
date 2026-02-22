@@ -84,7 +84,7 @@ impl std::fmt::Display for Confidence {
 
 /// A correlated deployment event — links events across platforms
 /// for the same commit/deployment.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorrelatedEvent {
     /// The project name from the correlation config, if matched.
     pub project_name: Option<String>,

@@ -7,10 +7,11 @@
 //! Both are normalized into `ProjectTelemetry`, stored in `DataSnapshot.telemetry`.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 /// Container/server resource utilization — primarily populated by Railway.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceMetrics {
     pub cpu_percent: Option<f64>,
     pub memory_used_mb: Option<f64>,
@@ -34,7 +35,7 @@ impl Default for ResourceMetrics {
 }
 
 /// Blackbox endpoint health — result of a single TTFB/uptime probe.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EndpointHealth {
     pub url: String,
     pub is_up: bool,
@@ -45,7 +46,7 @@ pub struct EndpointHealth {
 
 /// Rolling telemetry for a single project. Stored in `DataSnapshot.telemetry` keyed by
 /// correlation name. Not persisted — rebuilt fresh each TUI session.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectTelemetry {
     /// Latest Railway container stats (empty until first metrics poll succeeds).
     pub current_resources: ResourceMetrics,

@@ -20,7 +20,9 @@ pub struct VcPagination {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VcDeployment {
-    /// "dpl_xxx" — unique deployment ID
+    /// "dpl_xxx" — unique deployment ID.
+    /// `/v6/deployments` uses `uid`; `/v9/projects` `latestDeployments` uses `id`.
+    #[serde(alias = "id", default)]
     pub uid: String,
     /// Project name
     pub name: String,
@@ -218,6 +220,31 @@ mod tests {
         let meta = deployment.meta.unwrap();
         assert_eq!(meta.github_commit_sha, Some("abc123def456".to_string()));
         assert_eq!(meta.github_commit_ref, Some("main".to_string()));
+    }
+
+    #[test]
+    fn deserialize_deployment_with_id_alias() {
+        // /v9/projects latestDeployments uses "id" instead of "uid"
+        let json = r#"{
+            "id": "dpl_xyz789",
+            "name": "my-app",
+            "created": 1708000000000,
+            "state": "READY"
+        }"#;
+        let deployment: VcDeployment = serde_json::from_str(json).unwrap();
+        assert_eq!(deployment.uid, "dpl_xyz789");
+    }
+
+    #[test]
+    fn deserialize_deployment_missing_id_defaults_empty() {
+        // Some embedded deployment objects omit the ID field entirely
+        let json = r#"{
+            "name": "my-app",
+            "created": 1708000000000,
+            "state": "BUILDING"
+        }"#;
+        let deployment: VcDeployment = serde_json::from_str(json).unwrap();
+        assert_eq!(deployment.uid, "");
     }
 
     #[test]

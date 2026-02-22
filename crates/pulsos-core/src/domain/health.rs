@@ -2,9 +2,10 @@ use super::deployment::{DeploymentStatus, Platform};
 use crate::config::types::CorrelationConfig;
 use crate::correlation::event_matches_project;
 use crate::domain::deployment::DeploymentEvent;
+use serde::{Deserialize, Serialize};
 
 /// Per-platform breakdown of a health score.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HealthBreakdown {
     pub total: u8,
     pub github_score: Option<u8>,

@@ -1,21 +1,43 @@
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+mod opt_duration_secs {
+    use serde::{Deserializer, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(d: &Option<Duration>, s: S) -> Result<S::Ok, S::Error> {
+        match d {
+            None => s.serialize_none(),
+            Some(dur) => s.serialize_some(&dur.as_secs_f64()),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+        use serde::Deserialize;
+        let secs: Option<f64> = Option::deserialize(d)?;
+        Ok(secs.map(Duration::from_secs_f64))
+    }
+}
+
 /// The four DORA DevOps metrics, computed over a window of correlated events.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DoraMetrics {
     /// Count of successful production deployments in the tracked window.
     pub deployment_frequency: u32,
     /// Mean time from GitHub CI start → CD completion. None if no paired events.
+    #[serde(with = "opt_duration_secs")]
     pub lead_time_for_changes: Option<Duration>,
     /// Fraction of deployments where the CD platform ended in failure (0.0–100.0).
     pub change_failure_rate: f64,
     /// Mean time from a failed deployment to the next successful one. None if no failures.
+    #[serde(with = "opt_duration_secs")]
     pub time_to_restore_service: Option<Duration>,
     /// The span covered by the history buffer (oldest → newest event).
+    #[serde(with = "opt_duration_secs")]
     pub window_duration: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DoraRating {
     Elite,
     High,

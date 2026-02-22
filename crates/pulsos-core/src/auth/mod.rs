@@ -7,7 +7,7 @@ use std::fmt;
 
 /// Identifies which platform we're authenticating with.
 /// Separate from `domain::deployment::Platform` which is for domain modeling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PlatformKind {
     GitHub,
     Railway,
