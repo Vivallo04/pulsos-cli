@@ -1,0 +1,49 @@
+[package]
+name = "pulsos-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform deployment monitoring CLI"
+readme = "../../README.md"
+homepage = "https://github.com/Vivallo04/pulsos-cli"
+keywords = ["deployment", "monitoring", "devops", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "pulsos"
+path = "src/main.rs"
+
+[dependencies]
+pulsos-core.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+chrono.workspace = true
+dialoguer.workspace = true
+secrecy.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+dirs.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+notify-rust.workspace = true
+image.workspace = true
+reqwest.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = "0.13"
+tao = "0.26"
+muda = "0.13"
+
+[dev-dependencies]
+tempfile = "3"

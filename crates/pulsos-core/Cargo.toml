@@ -1,0 +1,35 @@
+[package]
+name = "pulsos-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core library for Pulsos deployment monitoring"
+readme = "../../README.md"
+homepage = "https://github.com/Vivallo04/pulsos-cli"
+keywords = ["deployment", "monitoring", "devops", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+sled.workspace = true
+chrono.workspace = true
+graphql_client.workspace = true
+dirs.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+keyring.workspace = true
+secrecy.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"
+temp-env = "0.3"
+pulsos-test.workspace = true
