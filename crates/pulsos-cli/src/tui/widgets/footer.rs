@@ -81,16 +81,13 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
         ));
     }
 
-    let mut entries: Vec<(&str, &str)> = vec![
+    let entries: Vec<(&str, &str)> = vec![
         ("[q]", "quit"),
         ("[Tab]", "switch tab (1-5)"),
         ("[↵]", "select"),
         ("[/]", "search"),
         ("[r]", "refresh"),
     ];
-    if app.active_tab == Tab::Logs {
-        entries.push(("[f]", "filter"));
-    }
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (i, (key, desc)) in entries.iter().enumerate() {
         if i > 0 {
@@ -99,6 +96,21 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
         spans.push(Span::styled(*key, theme.keybind_key()));
         spans.push(Span::styled(" ", theme.keybind_desc()));
         spans.push(Span::styled(*desc, theme.keybind_desc()));
+    }
+    if app.active_tab == Tab::Logs {
+        spans.push(Span::styled("  ", theme.keybind_desc()));
+        spans.push(Span::styled("[f]", theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled("filter", theme.keybind_desc()));
+    }
+    if app.active_tab == Tab::Unified {
+        spans.push(Span::styled("  ", theme.keybind_desc()));
+        spans.push(Span::styled("[s]", theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled(
+            format!("sort: {}", app.unified_sort.label()),
+            theme.keybind_desc(),
+        ));
     }
     Line::from(spans)
 }
@@ -185,6 +197,12 @@ pub fn render_help_text(app: &App) -> String {
         InputMode::Normal if app.active_tab == Tab::Logs => {
             "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [f] filter"
                 .to_string()
+        }
+        InputMode::Normal if app.active_tab == Tab::Unified => {
+            format!(
+                "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [s] sort: {}",
+                app.unified_sort.label()
+            )
         }
         InputMode::Normal => {
             "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh".to_string()
@@ -278,9 +296,29 @@ mod tests {
 
     #[test]
     fn footer_no_filter_hint_on_other_tabs() {
-        let app = test_app();
+        let mut app = test_app();
+        app.active_tab = Tab::Platform; // non-Unified, non-Logs
         let text = render_help_text(&app);
         assert!(!text.contains("[f]"));
+    }
+
+    #[test]
+    fn footer_shows_sort_hint_on_unified_tab() {
+        let mut app = test_app();
+        app.active_tab = Tab::Unified;
+        let text = render_help_text(&app);
+        assert!(text.contains("[s]"), "should contain sort key");
+        assert!(text.contains("sort: time"), "should show default sort mode");
+    }
+
+    #[test]
+    fn footer_sort_hint_updates_when_sort_changes() {
+        use crate::tui::app::UnifiedSort;
+        let mut app = test_app();
+        app.active_tab = Tab::Unified;
+        app.unified_sort = UnifiedSort::ByPlatform;
+        let text = render_help_text(&app);
+        assert!(text.contains("sort: platform"));
     }
 
     #[test]

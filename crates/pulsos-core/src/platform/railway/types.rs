@@ -176,6 +176,55 @@ impl From<RwDeploymentStatus> for DeploymentStatus {
     }
 }
 
+// ── Metrics query response shapes ──
+
+/// Root data for the `metrics` GraphQL query.
+#[derive(Debug, Deserialize)]
+pub struct MetricsData {
+    pub metrics: Vec<MetricSeries>,
+}
+
+/// One measurement series (e.g. CPU_USAGE) with time-value pairs.
+#[derive(Debug, Deserialize)]
+pub struct MetricSeries {
+    pub measurement: String,
+    pub values: Vec<MetricPoint>,
+}
+
+/// A single (timestamp, value) data point from the Railway metrics API.
+#[derive(Debug, Deserialize)]
+pub struct MetricPoint {
+    pub ts: chrono::DateTime<chrono::Utc>,
+    pub value: f64,
+}
+
+/// Resolved UUIDs needed to call the metrics API for a Railway resource.
+///
+/// Derived from the `platform_id` field stored in `TrackedResource`, which
+/// uses the format `"projectId:serviceId:environmentId"`.
+#[derive(Debug, Clone)]
+pub struct RailwayResourceIds {
+    pub project_id: String,
+    pub service_id: String,
+    pub environment_id: String,
+}
+
+impl RailwayResourceIds {
+    /// Parse the `"projectId:serviceId:environmentId"` format used by `TrackedResource.platform_id`.
+    pub fn from_platform_id(platform_id: &str) -> Option<Self> {
+        let parts: Vec<&str> = platform_id.split(':').collect();
+        if parts.len() >= 3 {
+            Some(Self {
+                project_id: parts[0].to_string(),
+                service_id: parts[1].to_string(),
+                environment_id: parts[2].to_string(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
 /// Workspaces from the me/teams query.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

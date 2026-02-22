@@ -1,11 +1,15 @@
 //! TUI application state — the single source of truth for the UI.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::config::types::PulsosConfig;
 use pulsos_core::config::types::TuiConfig;
+use pulsos_core::domain::analytics::DoraMetrics;
 use pulsos_core::domain::deployment::DeploymentEvent;
 use pulsos_core::domain::health::HealthBreakdown;
+use pulsos_core::domain::metrics::ProjectTelemetry;
 use pulsos_core::domain::project::CorrelatedEvent;
 use pulsos_core::health::PlatformHealthReport;
 
@@ -90,6 +94,32 @@ pub enum InputMode {
     Search,
 }
 
+/// Sort order for the Unified Overview table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UnifiedSort {
+    /// Newest event first (default).
+    #[default]
+    ByTime,
+    /// Group by CD platform present: Railway → Vercel → GitHub-only → Unmatched.
+    ByPlatform,
+}
+
+impl UnifiedSort {
+    pub fn next(self) -> Self {
+        match self {
+            Self::ByTime => Self::ByPlatform,
+            Self::ByPlatform => Self::ByTime,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ByTime => "time",
+            Self::ByPlatform => "platform",
+        }
+    }
+}
+
 /// Log level filter for the Logs tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFilter {
@@ -154,6 +184,15 @@ pub struct DataSnapshot {
     pub warnings: Vec<String>,
     /// Per-platform setup/auth/connectivity readiness reports.
     pub platform_health: Vec<PlatformHealthReport>,
+    /// Per-project real-time telemetry (keyed by correlation name).
+    ///
+    /// Populated by the background poller — Railway container stats and
+    /// Ping Engine results. Empty until the first telemetry cycle completes.
+    pub telemetry: HashMap<String, ProjectTelemetry>,
+    /// Aggregated DORA metrics computed over the session-level history buffer.
+    pub dora_metrics: DoraMetrics,
+    /// Number of correlated events accumulated in the DORA history buffer.
+    pub dora_history_count: usize,
     /// Whether a poll cycle is currently in flight.
     pub is_syncing: bool,
     /// When the snapshot was created.
@@ -175,6 +214,9 @@ impl Default for DataSnapshot {
             health_history: Vec::new(),
             warnings: Vec::new(),
             platform_health: Vec::new(),
+            telemetry: HashMap::new(),
+            dora_metrics: DoraMetrics::default(),
+            dora_history_count: 0,
             is_syncing: false,
             fetched_at: now,
             last_cycle_started_at: now,
@@ -226,6 +268,8 @@ pub struct App {
     pub log_buffer: LogRingBuffer,
     /// Active log level filter for the Logs tab.
     pub log_filter: LogFilter,
+    /// Current sort order for the Unified Overview table.
+    pub unified_sort: UnifiedSort,
 }
 
 impl App {
@@ -258,6 +302,7 @@ impl App {
             onboarding: OnboardingState::default(),
             log_buffer,
             log_filter: LogFilter::All,
+            unified_sort: UnifiedSort::default(),
         }
     }
 

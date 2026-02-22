@@ -1,3 +1,5 @@
+pub mod pinger;
+
 use std::collections::HashSet;
 use std::sync::Arc;
 

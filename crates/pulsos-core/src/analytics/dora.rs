@@ -1,6 +1,6 @@
 use crate::domain::analytics::DoraMetrics;
 use crate::domain::deployment::DeploymentStatus;
-use crate::domain::project::{Confidence, CorrelatedEvent};
+use crate::domain::project::CorrelatedEvent;
 use std::time::Duration;
 
 pub struct DoraCalculator;
@@ -8,14 +8,15 @@ pub struct DoraCalculator;
 impl DoraCalculator {
     /// Compute DORA metrics from a slice of correlated events.
     ///
-    /// Filters to events with `Confidence >= High` and production signals
-    /// (branch == "main"/"master", deploy_target == "production",
-    /// or environment_name == "production"). If none of these signals are set,
-    /// the event is included (cannot determine, assume production).
+    /// Includes all events that carry a production signal (branch == "main"/"master",
+    /// deploy_target == "production", or environment_name == "production"). If no
+    /// signal is set the event is included (cannot determine, assume production).
+    /// Cross-platform confidence is not required — a Railway or Vercel success counts
+    /// as a deployment even when there is no matching GitHub CI run.
     pub fn compute(events: &[CorrelatedEvent]) -> DoraMetrics {
         let valid: Vec<&CorrelatedEvent> = events
             .iter()
-            .filter(|e| e.confidence >= Confidence::High && Self::is_production(e))
+            .filter(|e| Self::is_production(e))
             .collect();
 
         if valid.is_empty() {
@@ -376,7 +377,10 @@ mod tests {
     }
 
     #[test]
-    fn low_confidence_events_excluded() {
+    fn all_confidence_levels_included() {
+        // Low and Unmatched events (Railway-only, no GitHub CI) are still production
+        // deployments — they count toward deployment frequency and CFR.
+        // Lead time requires a paired GitHub CI run, so it stays None here.
         let events = vec![
             correlated(
                 Confidence::Low,
@@ -395,7 +399,9 @@ mod tests {
         ];
 
         let result = DoraCalculator::compute(&events);
-        assert_eq!(result.deployment_frequency, 0);
+        // Both Railway-success events count as deployments
+        assert_eq!(result.deployment_frequency, 2);
+        // No GitHub CI paired — lead time cannot be computed
         assert!(result.lead_time_for_changes.is_none());
     }
 }

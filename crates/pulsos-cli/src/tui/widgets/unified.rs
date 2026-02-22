@@ -2,36 +2,69 @@
 //!
 //! Columns: Project(16) | SHA(9) | Message(min 24) | GitHub CI(14) | Railway(12) | Vercel(10) | Branch(18) | Age(7)
 
+use pulsos_core::domain::analytics::{DoraMetrics, DoraRating};
 use ratatui::{
-    layout::{Constraint, Rect},
+    layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
 
 use crate::output::table::{format_age, format_duration};
-use crate::tui::app::App;
+use crate::tui::app::{App, UnifiedSort};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::{draw_search_bar, split_search_bar, status_spans};
 
-/// Draw the Unified Overview table.
+/// Draw the Unified Overview table, optionally with a DORA banner above it.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let (search_area, area) = split_search_bar(area, app);
     if let Some(sa) = search_area {
         draw_search_bar(frame, sa, app, theme);
     }
 
-    // Header row (T4: bold + fg.subtle)
+    // Conditionally reserve space for the DORA banner above the table.
+    let has_dora = app.data.dora_metrics.deployment_frequency > 0
+        || app.data.dora_metrics.lead_time_for_changes.is_some();
+
+    let (dora_area, table_area) = if has_dora {
+        let chunks =
+            Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, area)
+    };
+
+    if let Some(da) = dora_area {
+        draw_dora_banner(
+            frame,
+            da,
+            &app.data.dora_metrics,
+            app.data.dora_history_count,
+            theme,
+        );
+    }
+
+    // Build sorted view of correlated events for display.
+    let mut sorted: Vec<&pulsos_core::domain::project::CorrelatedEvent> =
+        app.data.correlated.iter().collect();
+    if app.unified_sort == UnifiedSort::ByPlatform {
+        // Stable sort by platform group; within each group, timestamp order is preserved.
+        sorted.sort_by_key(|e| platform_sort_key(e));
+    }
+
+    // Header row (T4: bold + fg.subtle). Last column shows current sort mode.
+    let age_header = match app.unified_sort {
+        UnifiedSort::ByTime => "Age ↓",
+        UnifiedSort::ByPlatform => "Plat ▾",
+    };
     let header_cells = [
-        "Project", "SHA", "Message", "GitHub CI", "Railway", "Vercel", "Branch", "Age",
+        "Project", "SHA", "Message", "GitHub CI", "Railway", "Vercel", "Branch", age_header,
     ]
-    .iter()
-    .map(|h| Cell::from(*h).style(theme.t4()));
+    .into_iter()
+    .map(|h| Cell::from(h).style(theme.t4()));
     let header = Row::new(header_cells).height(1);
 
-    let rows: Vec<Row> = app
-        .data
-        .correlated
+    let rows: Vec<Row> = sorted
         .iter()
         .enumerate()
         .map(|(i, corr)| {
@@ -163,12 +196,125 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .highlight_symbol("▶ ");
 
     let mut table_state = TableState::default();
-    if !app.data.correlated.is_empty() {
-        let selected = app.selected_row.min(app.data.correlated.len().saturating_sub(1));
+    if !sorted.is_empty() {
+        let selected = app.selected_row.min(sorted.len().saturating_sub(1));
         table_state.select(Some(selected));
     }
 
-    frame.render_stateful_widget(table, area, &mut table_state);
+    frame.render_stateful_widget(table, table_area, &mut table_state);
+}
+
+/// Sort key for "by platform" mode.
+///
+/// Priority: Railway (0) → Vercel (1) → GitHub-only (2) → Unmatched (3).
+fn platform_sort_key(e: &pulsos_core::domain::project::CorrelatedEvent) -> u8 {
+    if e.railway.is_some() {
+        0
+    } else if e.vercel.is_some() {
+        1
+    } else if e.github.is_some() {
+        2
+    } else {
+        3
+    }
+}
+
+/// Draw the DORA Metrics banner panel.
+///
+/// Layout (6 rows including block borders):
+/// ```text
+/// ┌─ DORA Metrics (N events) ──────────────────────────────────────────┐
+/// │  🚀 VELOCITY                        🛡 STABILITY                   │
+/// │  Deploy Freq: 12                    Change Failure: 4.1%  (Elite)  │
+/// │  Lead Time: 4m 30s  (Elite)         Time to Restore: 12m  (High)   │
+/// │  Window: 7d 4h  (200 events)                                        │
+/// └────────────────────────────────────────────────────────────────────┘
+/// ```
+fn draw_dora_banner(
+    frame: &mut Frame,
+    area: Rect,
+    metrics: &DoraMetrics,
+    count: usize,
+    theme: &Theme,
+) {
+    let rating_style = |r: DoraRating| match r {
+        DoraRating::Elite => theme.success(),
+        DoraRating::High | DoraRating::Medium => theme.warning(),
+        DoraRating::Low => theme.failure(),
+    };
+
+    let lt_str = metrics
+        .lead_time_for_changes
+        .map(|d| format_duration(d.as_secs()))
+        .unwrap_or_else(|| "—".into());
+
+    let mttr_str = metrics
+        .time_to_restore_service
+        .map(|d| format_duration(d.as_secs()))
+        .unwrap_or_else(|| "—".into());
+
+    let cfr_str = format!("{:.1}%", metrics.change_failure_rate);
+    let cfr_rating = metrics.cfr_rating();
+    let lt_rating = metrics.lead_time_rating();
+
+    // Row 1: emoji section headers
+    let header_line = Line::from(vec![
+        Span::styled("  🚀 VELOCITY", theme.t4()),
+        Span::raw("                     "),
+        Span::styled("🛡 STABILITY", theme.t4()),
+    ]);
+
+    // Row 2: Deploy Freq (left) + Change Failure Rate (right)
+    let row2: Vec<Span> = vec![
+        Span::styled("  Deploy Freq: ", theme.t7()),
+        Span::styled(metrics.deployment_frequency.to_string(), theme.t5()),
+        Span::raw("                    "),
+        Span::styled("Change Failure: ", theme.t7()),
+        Span::styled(cfr_str, rating_style(cfr_rating)),
+        Span::styled(
+            format!("  ({})", cfr_rating.label()),
+            rating_style(cfr_rating),
+        ),
+    ];
+
+    // Row 3: Lead Time (left) + MTTR (right)
+    let mut row3: Vec<Span> = vec![
+        Span::styled("  Lead Time: ", theme.t7()),
+        Span::styled(lt_str, theme.t5()),
+    ];
+    if let Some(r) = lt_rating {
+        row3.push(Span::styled(format!("  ({})", r.label()), rating_style(r)));
+    }
+    row3.push(Span::raw("          "));
+    row3.push(Span::styled("Time to Restore: ", theme.t7()));
+    row3.push(Span::styled(mttr_str, theme.t5()));
+
+    // Row 4: window duration summary
+    let window_str = match metrics.window_duration {
+        Some(d) => format!(
+            "  Window: {}  ({count} events)",
+            format_duration(d.as_secs())
+        ),
+        None => format!("  {count} events tracked this session"),
+    };
+    let row4 = Line::from(Span::styled(window_str, theme.t9()));
+
+    let text = ratatui::text::Text::from(vec![
+        header_line,
+        Line::from(row2),
+        Line::from(row3),
+        row4,
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.panel_border())
+        .title(Span::styled(
+            format!(" DORA Metrics ({count} events) "),
+            theme.t1(),
+        ));
+
+    frame.render_widget(Paragraph::new(text).block(block), area);
 }
 
 #[cfg(test)]

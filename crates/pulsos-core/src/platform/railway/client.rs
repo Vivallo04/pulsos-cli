@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::types::{
-    DeploymentsData, GqlResponse, MeData, ProjectsData, RwDeployment, TeamsData, WorkspaceData,
-    WorkspaceProjectsData,
+    DeploymentsData, GqlResponse, MeData, MetricsData, ProjectsData, RailwayResourceIds,
+    RwDeployment, TeamsData, WorkspaceData, WorkspaceProjectsData,
 };
 
 pub struct RailwayClient {
@@ -194,6 +194,78 @@ impl RailwayClient {
         }
     }
 
+    /// Fetch real-time container metrics for a Railway service.
+    ///
+    /// `platform_id` uses the format `"projectId:serviceId:environmentId"` stored in
+    /// `TrackedResource.platform_id`. Returns an empty `ResourceMetrics` (all `None`) if the
+    /// format is invalid or the API call fails, so callers degrade gracefully.
+    pub async fn fetch_service_metrics(
+        &self,
+        platform_id: &str,
+    ) -> crate::domain::metrics::ResourceMetrics {
+        let ids = match RailwayResourceIds::from_platform_id(platform_id) {
+            Some(ids) => ids,
+            None => {
+                tracing::warn!(platform_id, "Invalid Railway platform_id format for metrics");
+                return crate::domain::metrics::ResourceMetrics::default();
+            }
+        };
+
+        let start_date = (chrono::Utc::now() - chrono::Duration::minutes(5))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+        let variables = serde_json::json!({
+            "environmentId": ids.environment_id,
+            "serviceId": ids.service_id,
+            "startDate": start_date,
+            "measurements": [
+                "CPU_USAGE",
+                "MEMORY_USAGE_GB",
+                "MEMORY_LIMIT_GB",
+                "NETWORK_RX_GB",
+                "NETWORK_TX_GB",
+            ],
+        });
+
+        let data: MetricsData = match self
+            .execute_query(METRICS_QUERY, variables)
+            .await
+        {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::debug!(
+                    platform_id,
+                    error = %e,
+                    "Railway metrics fetch failed"
+                );
+                return crate::domain::metrics::ResourceMetrics::default();
+            }
+        };
+
+        let mut metrics = crate::domain::metrics::ResourceMetrics::default();
+
+        for series in &data.metrics {
+            let latest_value = series.values.last().map(|p| p.value);
+            if let Some(val) = latest_value {
+                match series.measurement.as_str() {
+                    "CPU_USAGE" => metrics.cpu_percent = Some(val * 100.0),
+                    "MEMORY_USAGE_GB" => metrics.memory_used_mb = Some(val * 1024.0),
+                    "MEMORY_LIMIT_GB" => metrics.memory_limit_mb = Some(val * 1024.0),
+                    "NETWORK_RX_GB" => {
+                        metrics.network_rx_bytes = Some((val * 1_073_741_824.0) as u64)
+                    }
+                    "NETWORK_TX_GB" => {
+                        metrics.network_tx_bytes = Some((val * 1_073_741_824.0) as u64)
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        metrics.timestamp = chrono::Utc::now();
+        metrics
+    }
+
     async fn discover_legacy_by_teams(&self) -> Result<Vec<DiscoveredResource>, PulsosError> {
         let teams_data: TeamsData = self
             .execute_query(TEAMS_QUERY, serde_json::json!({}))
@@ -240,6 +312,18 @@ impl RailwayClient {
         Ok(resources)
     }
 }
+
+const METRICS_QUERY: &str = r#"
+query($environmentId: String!, $serviceId: String, $startDate: DateTime!, $measurements: [MetricMeasurement!]!) {
+  metrics(environmentId: $environmentId, serviceId: $serviceId, startDate: $startDate, measurements: $measurements) {
+    measurement
+    values {
+      ts
+      value
+    }
+  }
+}
+"#;
 
 const DEPLOYMENTS_QUERY: &str = r#"
 query($input: DeploymentListInput!, $first: Int) {

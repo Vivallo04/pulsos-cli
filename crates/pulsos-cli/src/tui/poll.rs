@@ -15,14 +15,19 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use tokio::sync::watch;
 
+use pulsos_core::analytics::dora::DoraCalculator;
 use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
 use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::types::{CorrelationConfig, PulsosConfig};
 use pulsos_core::correlation;
+use pulsos_core::domain::analytics::DoraMetrics;
 use pulsos_core::domain::deployment::DeploymentEvent;
 use pulsos_core::domain::health;
+use pulsos_core::domain::metrics::ProjectTelemetry;
+use pulsos_core::domain::project::CorrelatedEvent;
+use pulsos_core::health::pinger::PingEngine;
 use pulsos_core::health::{check_all_platforms_health, PlatformHealthReport};
 use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::railway::client::RailwayClient;
@@ -41,12 +46,17 @@ pub enum PollerCommand {
 
 /// Maximum number of health history entries per project (for sparklines).
 const HEALTH_HISTORY_CAP: usize = 20;
+/// Maximum number of correlated events kept in the session-level DORA history buffer.
+const DORA_HISTORY_CAP: usize = 200;
 
 /// Per-platform throttle intervals.
 const GITHUB_THROTTLE: Duration = Duration::from_secs(30);
 const RAILWAY_THROTTLE: Duration = Duration::from_secs(15);
 const VERCEL_THROTTLE: Duration = Duration::from_secs(15);
 const HEALTH_THROTTLE: Duration = Duration::from_secs(30);
+/// Telemetry throttle intervals.
+const METRICS_THROTTLE: Duration = Duration::from_secs(30);
+const PING_THROTTLE: Duration = Duration::from_secs(8);
 
 fn combine_events(
     github: &[DeploymentEvent],
@@ -179,6 +189,15 @@ pub async fn run_poller(
     // Health history ring buffer: project_name → Vec<u8>
     let mut health_history: HashMap<String, Vec<u8>> = HashMap::new();
 
+    // DORA history ring buffer: accumulates correlated events across poll cycles (cap 200).
+    let mut dora_history: Vec<CorrelatedEvent> = Vec::new();
+
+    // Telemetry state: project_name → ProjectTelemetry (Railway metrics + pings)
+    let mut last_telemetry: HashMap<String, ProjectTelemetry> = HashMap::new();
+    let mut last_metrics_at = Instant::now() - METRICS_THROTTLE;
+    let mut last_ping_at = Instant::now() - PING_THROTTLE;
+    let ping_engine = PingEngine::new();
+
     loop {
         let mut force_refresh = match wait_for_next_cycle(
             &mut first_cycle,
@@ -233,6 +252,9 @@ pub async fn run_poller(
             health_history: pre_health_history,
             warnings: last_cycle_warnings.clone(),
             platform_health: last_platform_health.clone(),
+            telemetry: last_telemetry.clone(),
+            dora_metrics: DoraMetrics::default(),
+            dora_history_count: 0,
             is_syncing: true,
             fetched_at: Utc::now(),
             last_cycle_started_at: cycle_started_at,
@@ -338,6 +360,64 @@ pub async fn run_poller(
             last_health_check_at = now;
         }
 
+        // Railway container metrics (whitebox — uses Railway GraphQL metrics API)
+        if !resources.railway.is_empty()
+            && (force_refresh || now.duration_since(last_metrics_at) >= METRICS_THROTTLE)
+        {
+            if let Some(token) = resolver.resolve(&PlatformKind::Railway) {
+                let client = RailwayClient::new(token, cache.clone());
+                for resource in &resources.railway {
+                    let metrics = client.fetch_service_metrics(&resource.platform_id).await;
+                    last_telemetry
+                        .entry(resource.display_name.clone())
+                        .or_default()
+                        .current_resources = metrics;
+                }
+                last_metrics_at = now;
+            }
+        }
+
+        // Ping engine (blackbox — probes deployed URLs for TTFB/uptime)
+        // Hits user's own servers, not platform APIs, so uses a tighter interval.
+        if force_refresh || now.duration_since(last_ping_at) >= PING_THROTTLE {
+            for corr in &config.correlations {
+                // Prefer the most recent Vercel URL, fall back to Railway static_url.
+                let url = last_vercel_events
+                    .iter()
+                    .chain(last_railway_events.iter())
+                    .filter(|e| {
+                        e.metadata
+                            .source_id
+                            .as_deref()
+                            .map(|id| {
+                                corr.vercel_project.as_deref() == Some(id)
+                                    || corr.railway_project.as_deref() == Some(id)
+                                    || id.contains(
+                                        corr.vercel_project.as_deref().unwrap_or(""),
+                                    )
+                            })
+                            .unwrap_or(false)
+                    })
+                    .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()))
+                    .or_else(|| {
+                        // Fallback: any recent event that belongs to this correlation
+                        last_vercel_events
+                            .iter()
+                            .chain(last_railway_events.iter())
+                            .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()))
+                    });
+
+                if let Some(u) = url {
+                    let ping = ping_engine.ping(&u).await;
+                    last_telemetry
+                        .entry(corr.name.clone())
+                        .or_default()
+                        .push_ping(ping);
+                }
+            }
+            last_ping_at = now;
+        }
+
         let all_events = combine_events(
             &last_github_events,
             &last_railway_events,
@@ -346,6 +426,25 @@ pub async fn run_poller(
 
         // Build correlated events using core correlation engine.
         let correlated = correlation::correlate_all(&config.correlations, &all_events);
+
+        // Merge new correlated events into the DORA history buffer.
+        // Deduplicate by (project_name, commit_sha). Evict oldest when cap exceeded.
+        for event in &correlated {
+            let already_present = dora_history.iter().any(|h| {
+                h.project_name == event.project_name && h.commit_sha == event.commit_sha
+            });
+            if !already_present {
+                dora_history.push(event.clone());
+            }
+        }
+        if dora_history.len() > DORA_HISTORY_CAP {
+            let excess = dora_history.len() - DORA_HISTORY_CAP;
+            dora_history.drain(0..excess);
+        }
+
+        // Compute aggregate DORA metrics from accumulated history.
+        let dora_metrics = DoraCalculator::compute(&dora_history);
+        let dora_history_count = dora_history.len();
 
         // Compute health scores and breakdowns per correlation.
         let health_scores =
@@ -376,6 +475,9 @@ pub async fn run_poller(
             health_history: health_history_snapshot,
             warnings: warnings.clone(),
             platform_health: last_platform_health.clone(),
+            telemetry: last_telemetry.clone(),
+            dora_metrics,
+            dora_history_count,
             is_syncing: false,
             fetched_at: cycle_completed_at,
             last_cycle_started_at: cycle_started_at,

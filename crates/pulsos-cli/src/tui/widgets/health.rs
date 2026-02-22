@@ -12,7 +12,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     prelude::Stylize,
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table, TableState},
+    widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Sparkline, Table, TableState},
     Frame,
 };
 
@@ -21,6 +21,7 @@ use crate::tui::app::App;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::{draw_search_bar, split_search_bar, status_spans};
 use pulsos_core::domain::health::HealthBreakdown;
+use pulsos_core::domain::metrics::ProjectTelemetry;
 
 /// Draw the Health & Metrics tab.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -131,11 +132,14 @@ fn draw_detail_panel(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .find(|(n, _)| n == project_name)
         .map(|(_, bd)| bd);
 
+    let telemetry = app.data.telemetry.get(project_name);
+
     let sections = Layout::vertical([
         Constraint::Length(2), // Header
         Constraint::Length(5), // Weight bars
         Constraint::Length(6), // Recent Events
-        Constraint::Min(3),   // Sparkline
+        Constraint::Length(4), // Telemetry (title + mem gauge + cpu gauge + ping)
+        Constraint::Min(3),    // Sparkline
     ])
     .split(inner);
 
@@ -161,8 +165,122 @@ fn draw_detail_panel(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     // Section 3: Recent Events
     draw_recent_events(frame, sections[2], project_name, app, theme);
 
-    // Section 4: History sparkline
-    draw_history_sparkline(frame, sections[3], project_name, app, theme);
+    // Section 4: Telemetry (Railway metrics + Ping Engine)
+    draw_telemetry(frame, sections[3], telemetry, theme);
+
+    // Section 5: History sparkline + latency sparkline
+    draw_history_sparkline(frame, sections[4], project_name, telemetry, app, theme);
+}
+
+/// Render the TELEMETRY section: Railway container stats + latest ping result.
+fn draw_telemetry(
+    frame: &mut Frame,
+    area: Rect,
+    telemetry: Option<&ProjectTelemetry>,
+    theme: &Theme,
+) {
+    // 4-row sub-layout: title | mem gauge | cpu gauge | ping
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    // Row 0: section title
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(" TELEMETRY", theme.t4()))),
+        rows[0],
+    );
+
+    let Some(tel) = telemetry else {
+        frame.render_widget(
+            Paragraph::new(Span::styled(" No telemetry data yet", theme.t8())),
+            rows[1],
+        );
+        return;
+    };
+
+    let res = &tel.current_resources;
+
+    // Row 1: Memory Gauge
+    if let (Some(used), Some(limit)) = (res.memory_used_mb, res.memory_limit_mb) {
+        let ratio = (used / limit).clamp(0.0, 1.0);
+        let percent = (ratio * 100.0) as u8;
+        let color = theme.health_color(100u8.saturating_sub(percent));
+        let gauge = Gauge::default()
+            .gauge_style(ratatui::style::Style::new().fg(color))
+            .ratio(ratio)
+            .label(format!(" MEM {percent}%  ({used:.0}/{limit:.0} MB)"));
+        frame.render_widget(gauge, rows[1]);
+    } else {
+        frame.render_widget(
+            Paragraph::new(Span::styled(" MEM —", theme.t8())),
+            rows[1],
+        );
+    }
+
+    // Row 2: CPU Gauge
+    if let Some(cpu) = res.cpu_percent {
+        let ratio = (cpu / 100.0).clamp(0.0, 1.0);
+        let percent = cpu as u8;
+        let color = theme.health_color(100u8.saturating_sub(percent));
+        let gauge = Gauge::default()
+            .gauge_style(ratatui::style::Style::new().fg(color))
+            .ratio(ratio)
+            .label(format!(" CPU {cpu:.1}%"));
+        frame.render_widget(gauge, rows[2]);
+    } else {
+        frame.render_widget(
+            Paragraph::new(Span::styled(" CPU —", theme.t8())),
+            rows[2],
+        );
+    }
+
+    // Row 3: Latest ping result
+    match tel.latest_ping() {
+        None => {
+            frame.render_widget(
+                Paragraph::new(Span::styled(" Ping: waiting…", theme.t8())),
+                rows[3],
+            );
+        }
+        Some(ping) => {
+            let age = format_age(ping.checked_at);
+            let (sym, sym_style) = if ping.is_up {
+                ("✓", ratatui::style::Style::new().fg(theme.status_success))
+            } else {
+                ("✗", ratatui::style::Style::new().fg(theme.status_failure))
+            };
+            let status_str = ping
+                .status_code
+                .map(|c| format!("{c}"))
+                .unwrap_or_else(|| "unreachable".into());
+            let latency_str = ping
+                .latency_ms
+                .map(|ms| format!("{ms}ms"))
+                .unwrap_or_else(|| "—".into());
+            let host = ping
+                .url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or(&ping.url);
+            let max_host = area.width.saturating_sub(28) as usize;
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(" Ping: ", theme.t8()),
+                    Span::styled(sym, sym_style),
+                    Span::styled(format!(" {latency_str}  {status_str}  "), theme.t8()),
+                    Span::styled(truncate_str(host, max_host), theme.t6()),
+                    Span::styled(format!("  {age}"), theme.t9()),
+                ])),
+                rows[3],
+            );
+        }
+    }
 }
 
 /// Render per-platform weight bars with accent colors.
@@ -277,14 +395,23 @@ fn draw_recent_events(
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-/// Render the sparkline for the selected project's health history.
+/// Render health-history sparkline (top) and ping-latency sparkline (bottom).
 fn draw_history_sparkline(
     frame: &mut Frame,
     area: Rect,
     project_name: &str,
+    telemetry: Option<&ProjectTelemetry>,
     app: &App,
     theme: &Theme,
 ) {
+    // Split area 50/50: health history on top, latency on bottom.
+    let halves = Layout::vertical([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .split(area);
+
+    // Top half: health score history
     let history = app
         .data
         .health_history
@@ -294,25 +421,20 @@ fn draw_history_sparkline(
 
     if let Some(data) = history {
         let data_u64: Vec<u64> = data.iter().map(|&v| v as u64).collect();
-
         let sparkline = Sparkline::default()
             .block(
                 Block::default()
                     .borders(Borders::TOP)
                     .border_style(theme.panel_border())
                     .title(Span::styled(
-                        format!(
-                            " History (last {} points) ",
-                            data_u64.len()
-                        ),
+                        format!(" Health (last {} points) ", data_u64.len()),
                         theme.t6(),
                     )),
             )
             .data(&data_u64)
             .max(100)
             .style(ratatui::style::Style::new().fg(theme.status_active));
-
-        frame.render_widget(sparkline, area);
+        frame.render_widget(sparkline, halves[0]);
     } else {
         let msg = Paragraph::new(" No history for selected project.")
             .style(theme.t8())
@@ -321,7 +443,44 @@ fn draw_history_sparkline(
                     .borders(Borders::TOP)
                     .border_style(theme.panel_border()),
             );
-        frame.render_widget(msg, area);
+        frame.render_widget(msg, halves[0]);
+    }
+
+    // Bottom half: ping latency history
+    // Clamp each value to 1000ms so the scale stays meaningful.
+    let latency_data: Vec<u64> = telemetry
+        .map(|tel| {
+            tel.endpoint_history
+                .iter()
+                .map(|ep| ep.latency_ms.unwrap_or(0).min(1000))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if !latency_data.is_empty() {
+        let latency_sparkline = Sparkline::default()
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(theme.panel_border())
+                    .title(Span::styled(
+                        format!(" Latency ms (last {} pings) ", latency_data.len()),
+                        theme.t6(),
+                    )),
+            )
+            .data(&latency_data)
+            .max(1000) // prevents solid-blue-block when values are near-uniform
+            .style(ratatui::style::Style::new().fg(theme.platform_rw));
+        frame.render_widget(latency_sparkline, halves[1]);
+    } else {
+        let msg = Paragraph::new(" No ping history.")
+            .style(theme.t8())
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(theme.panel_border()),
+            );
+        frame.render_widget(msg, halves[1]);
     }
 }
 

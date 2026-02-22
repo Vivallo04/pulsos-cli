@@ -84,6 +84,12 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             app.selected_row = 0;
         }
 
+        // Unified tab sort cycling
+        KeyCode::Char('s') if app.active_tab == Tab::Unified => {
+            app.unified_sort = app.unified_sort.next();
+            app.selected_row = 0;
+        }
+
         // Force refresh
         KeyCode::Char('r') => {
             app.force_refresh = true;
@@ -697,5 +703,38 @@ mod tests {
         app.active_tab = Tab::Health;
         handle_key(&mut app, make_key(KeyCode::Char('f')));
         assert_eq!(app.log_filter, filter_before);
+    }
+
+    #[test]
+    fn s_key_cycles_unified_sort() {
+        use crate::tui::app::UnifiedSort;
+        let mut app = test_app();
+        app.active_tab = Tab::Unified;
+
+        assert_eq!(app.unified_sort, UnifiedSort::ByTime);
+        handle_key(&mut app, make_key(KeyCode::Char('s')));
+        assert_eq!(app.unified_sort, UnifiedSort::ByPlatform);
+        assert_eq!(app.selected_row, 0); // resets selection
+
+        handle_key(&mut app, make_key(KeyCode::Char('s')));
+        assert_eq!(app.unified_sort, UnifiedSort::ByTime);
+    }
+
+    #[test]
+    fn s_key_does_nothing_on_other_tabs() {
+        use crate::tui::app::UnifiedSort;
+        let mut app = test_app();
+
+        app.active_tab = Tab::Platform;
+        handle_key(&mut app, make_key(KeyCode::Char('s')));
+        assert_eq!(app.unified_sort, UnifiedSort::ByTime); // unchanged
+
+        app.active_tab = Tab::Health;
+        handle_key(&mut app, make_key(KeyCode::Char('s')));
+        assert_eq!(app.unified_sort, UnifiedSort::ByTime); // unchanged
+
+        app.active_tab = Tab::Logs;
+        handle_key(&mut app, make_key(KeyCode::Char('s')));
+        assert_eq!(app.unified_sort, UnifiedSort::ByTime); // unchanged
     }
 }

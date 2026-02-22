@@ -26,7 +26,7 @@ use sha_match::find_sha_matches;
 /// `source_id` is absent (e.g. events from older cache entries).
 pub fn event_matches_project(event: &DeploymentEvent, config: &CorrelationConfig) -> bool {
     match event.platform {
-        Platform::GitHub => config.github_repo.as_ref().map_or(false, |repo| {
+        Platform::GitHub => config.github_repo.as_ref().is_some_and(|repo| {
             if let Some(ref sid) = event.metadata.source_id {
                 sid == repo
             } else {
@@ -34,7 +34,7 @@ pub fn event_matches_project(event: &DeploymentEvent, config: &CorrelationConfig
                 event.id.starts_with(repo)
             }
         }),
-        Platform::Railway => config.railway_project.as_ref().map_or(false, |project| {
+        Platform::Railway => config.railway_project.as_ref().is_some_and(|project| {
             if let Some(ref sid) = event.metadata.source_id {
                 sid == project || sid.starts_with(&format!("{project}:"))
             } else {
@@ -42,7 +42,7 @@ pub fn event_matches_project(event: &DeploymentEvent, config: &CorrelationConfig
                 event.id.contains(project)
             }
         }),
-        Platform::Vercel => config.vercel_project.as_ref().map_or(false, |project| {
+        Platform::Vercel => config.vercel_project.as_ref().is_some_and(|project| {
             if let Some(ref sid) = event.metadata.source_id {
                 sid == project
             } else {
@@ -119,7 +119,7 @@ pub fn correlate_project_events(
         let _ = railway_conf;
 
         let is_stale = github[*gi].is_from_cache
-            || railway_event.as_ref().map_or(false, |e| e.is_from_cache)
+            || railway_event.as_ref().is_some_and(|e| e.is_from_cache)
             || vercel[*vi].is_from_cache;
 
         result.push(CorrelatedEvent {
@@ -161,7 +161,7 @@ pub fn correlate_project_events(
         );
 
         let is_stale =
-            gh_event.is_from_cache || railway_event.as_ref().map_or(false, |e| e.is_from_cache);
+            gh_event.is_from_cache || railway_event.as_ref().is_some_and(|e| e.is_from_cache);
 
         result.push(CorrelatedEvent {
             project_name: None,
@@ -202,7 +202,7 @@ pub fn correlate_project_events(
         );
 
         let is_stale =
-            vc_event.is_from_cache || railway_event.as_ref().map_or(false, |e| e.is_from_cache);
+            vc_event.is_from_cache || railway_event.as_ref().is_some_and(|e| e.is_from_cache);
 
         result.push(CorrelatedEvent {
             project_name: None,
