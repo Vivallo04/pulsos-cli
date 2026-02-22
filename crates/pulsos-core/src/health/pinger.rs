@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::error::PulsosError;
 use crate::domain::metrics::EndpointHealth;
 
 /// Lightweight HTTP prober. Reuses a single `reqwest::Client` across pings.
@@ -17,15 +18,19 @@ pub struct PingEngine {
 
 impl PingEngine {
     /// Create a new `PingEngine` with a 5-second per-request timeout.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, PulsosError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .connect_timeout(Duration::from_secs(3))
             .user_agent("pulsos-ping/0.1.0")
             .build()
-            .expect("Failed to build ping HTTP client");
+            .map_err(|e| {
+                PulsosError::Other(anyhow::anyhow!(
+                    "Failed to build ping HTTP client: {e}"
+                ))
+            })?;
 
-        Self { client }
+        Ok(Self { client })
     }
 
     /// Probe a URL and return an `EndpointHealth` with latency and status.
@@ -64,19 +69,14 @@ impl PingEngine {
     }
 }
 
-impl Default for PingEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn ping_engine_creates_without_panic() {
-        let _engine = PingEngine::new();
+    fn ping_engine_creates_without_panic() -> Result<(), PulsosError> {
+        let _engine = PingEngine::new()?;
+        Ok(())
     }
 
     // Note: network tests are not run in unit test suite.

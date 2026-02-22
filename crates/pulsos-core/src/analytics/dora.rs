@@ -78,7 +78,12 @@ impl DoraCalculator {
                             .as_ref()
                             .map(|r| r.status == DeploymentStatus::Success)
                     })
-                    .unwrap_or(false)
+                    .unwrap_or_else(|| {
+                        e.github
+                            .as_ref()
+                            .map(|g| g.status == DeploymentStatus::Success)
+                            .unwrap_or(false)
+                    })
             })
             .count() as u32
     }

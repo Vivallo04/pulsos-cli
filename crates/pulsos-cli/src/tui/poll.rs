@@ -204,7 +204,10 @@ pub async fn run_poller(
     let mut last_telemetry: HashMap<String, ProjectTelemetry> = HashMap::new();
     let mut last_metrics_at = Instant::now() - METRICS_THROTTLE;
     let mut last_ping_at = Instant::now() - PING_THROTTLE;
-    let ping_engine = PingEngine::new();
+    let (ping_engine, ping_engine_error) = match PingEngine::new() {
+        Ok(engine) => (Some(engine), None),
+        Err(err) => (None, Some(err.user_message())),
+    };
 
     loop {
         let mut force_refresh = match wait_for_next_cycle(
@@ -403,33 +406,37 @@ pub async fn run_poller(
         // Ping engine (blackbox — probes deployed URLs for TTFB/uptime)
         // Hits user's own servers, not platform APIs, so uses a tighter interval.
         if force_refresh || now.duration_since(last_ping_at) >= PING_THROTTLE {
-            for corr in &config.correlations {
-                // Prefer the most recent Vercel URL, fall back to Railway static_url.
-                let url = last_vercel_events
-                    .iter()
-                    .chain(last_railway_events.iter())
-                    .filter(|e| {
-                        e.metadata
-                            .source_id
-                            .as_deref()
-                            .map(|id| {
-                                corr.vercel_project
-                                    .as_deref()
-                                    .map(|vp| id == vp || id.contains(vp))
-                                    .unwrap_or(false)
-                                    || corr.railway_project.as_deref() == Some(id)
-                            })
-                            .unwrap_or(false)
-                    })
-                    .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()));
+            if let Some(ref engine) = ping_engine {
+                for corr in &config.correlations {
+                    // Prefer the most recent Vercel URL, fall back to Railway static_url.
+                    let url = last_vercel_events
+                        .iter()
+                        .chain(last_railway_events.iter())
+                        .filter(|e| {
+                            e.metadata
+                                .source_id
+                                .as_deref()
+                                .map(|id| {
+                                    corr.vercel_project
+                                        .as_deref()
+                                        .map(|vp| id == vp || id.contains(vp))
+                                        .unwrap_or(false)
+                                        || corr.railway_project.as_deref() == Some(id)
+                                })
+                                .unwrap_or(false)
+                        })
+                        .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()));
 
-                if let Some(u) = url {
-                    let ping = ping_engine.ping(&u).await;
-                    last_telemetry
-                        .entry(corr.name.clone())
-                        .or_default()
-                        .push_ping(ping);
+                    if let Some(u) = url {
+                        let ping = engine.ping(&u).await;
+                        last_telemetry
+                            .entry(corr.name.clone())
+                            .or_default()
+                            .push_ping(ping);
+                    }
                 }
+            } else if let Some(ref err) = ping_engine_error {
+                warnings.push(format!("Ping engine unavailable: {err}"));
             }
             last_ping_at = now;
         }
