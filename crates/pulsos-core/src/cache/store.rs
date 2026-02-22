@@ -86,20 +86,26 @@ impl CacheStore {
 
     /// Open the default cache, falling back to a temporary in-memory db if the disk
     /// cache is locked (e.g. another pulsos instance is running).
-    pub fn open_or_temporary() -> Self {
+    ///
+    /// Returns `Err` only if both the default path **and** the temporary fallback fail.
+    pub fn open_or_temporary() -> Result<Self, PulsosError> {
         match Self::open_default() {
-            Ok(c) => c,
-            Err(_) => {
-                let db = sled::Config::new()
-                    .temporary(true)
-                    .open()
-                    .expect("Failed to open temporary sled db");
-                Self {
-                    db,
-                    path: std::path::PathBuf::new(),
-                }
+            Ok(c) => return Ok(c),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Persistent cache unavailable, falling back to in-memory sled db"
+                );
             }
         }
+        sled::Config::new()
+            .temporary(true)
+            .open()
+            .map(|db| Self {
+                db,
+                path: std::path::PathBuf::new(),
+            })
+            .map_err(|e| PulsosError::Cache(format!("Failed to open temporary sled db: {e}")))
     }
 
     pub fn get<T: DeserializeOwned>(

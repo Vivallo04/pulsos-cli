@@ -104,7 +104,7 @@ async fn sync_command(
     // Load existing config or start fresh.
     let existing_config = load_config(config_path).unwrap_or_default();
 
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = Arc::new(CacheStore::open_or_temporary()?);
     let store: Arc<dyn CredentialStore> = match store_override {
         Some(store) => store,
         None => Arc::new(FallbackStore::new()?),
@@ -877,7 +877,7 @@ async fn verify_command(config_path: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = Arc::new(CacheStore::open_or_temporary()?);
     let store: Arc<dyn CredentialStore> = Arc::new(FallbackStore::new()?);
     let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
     let health_reports = check_all_platforms_health(&config, &resolver, &cache).await;

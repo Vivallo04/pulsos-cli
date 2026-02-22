@@ -31,4 +31,5 @@ secrecy.workspace = true
 wiremock.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
+temp-env = "0.3"
 pulsos-test.workspace = true

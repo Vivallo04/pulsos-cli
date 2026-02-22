@@ -239,30 +239,27 @@ impl CredentialStore for FallbackStore {
     }
 
     fn set(&self, platform: &PlatformKind, token: &str) -> Result<(), PulsosError> {
-        // Write to keyring first (best security), but also persist to the fallback
-        // file store so fresh processes can always resolve credentials in environments
-        // where keyring read behavior is inconsistent.
+        // Try the OS keyring first. Only write the plaintext file as a fallback
+        // when the keyring is unavailable — avoids an unnecessary cleartext copy
+        // on systems where the keyring works correctly.
         let keyring_result = self.keyring.set(platform, token);
-        if let Err(e) = &keyring_result {
+        let set_result = if keyring_result.is_err() {
             tracing::info!(
                 platform = platform.display_name(),
-                error = %e,
+                error = %keyring_result.as_ref().unwrap_err(),
                 "OS keyring unavailable, falling back to credentials file"
             );
-        }
-        let file_result = self.file.set(platform, token);
-        if let Err(e) = &file_result {
-            tracing::debug!(
-                platform = platform.display_name(),
-                error = %e,
-                "Failed to persist token to fallback credentials file"
-            );
-        }
-
-        let set_result = if keyring_result.is_ok() || file_result.is_ok() {
-            Ok(())
-        } else {
+            let file_result = self.file.set(platform, token);
+            if let Err(ref e) = file_result {
+                tracing::debug!(
+                    platform = platform.display_name(),
+                    error = %e,
+                    "Failed to persist token to fallback credentials file"
+                );
+            }
             file_result
+        } else {
+            keyring_result
         };
 
         if set_result.is_ok() {
@@ -279,9 +276,22 @@ impl CredentialStore for FallbackStore {
             session.remove(platform.keyring_username());
         }
 
-        // Best-effort deletion from both stores.
-        let _ = self.keyring.delete(platform);
-        let _ = self.file.delete(platform);
+        // Attempt deletion from both stores and warn on any failure, so a
+        // user-initiated logout actually removes the credential everywhere.
+        if let Err(e) = self.keyring.delete(platform) {
+            tracing::warn!(
+                platform = platform.display_name(),
+                error = %e,
+                "Failed to delete token from keyring"
+            );
+        }
+        if let Err(e) = self.file.delete(platform) {
+            tracing::warn!(
+                platform = platform.display_name(),
+                error = %e,
+                "Failed to delete token from credentials file"
+            );
+        }
         Ok(())
     }
 }

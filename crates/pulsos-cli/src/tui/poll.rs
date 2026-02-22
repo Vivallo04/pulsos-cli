@@ -11,7 +11,7 @@
 //! When a daemon is running locally, `run_poller_or_daemon_client` connects to
 //! the SSE stream instead of polling platform APIs directly.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -163,7 +163,13 @@ pub async fn run_poller(
 ) {
     let mut resources = PlatformResources::from_correlations(&config.correlations);
 
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = match CacheStore::open_or_temporary() {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            tracing::error!("Cache unavailable, poller cannot start: {e}");
+            return;
+        }
+    };
 
     let store: Arc<dyn CredentialStore> = match FallbackStore::new() {
         Ok(s) => Arc::new(s),
@@ -190,8 +196,8 @@ pub async fn run_poller(
     let mut last_cycle_completed_at = Utc::now();
     let mut last_health_check_at = Instant::now() - HEALTH_THROTTLE;
 
-    // Health history ring buffer: project_name → Vec<u8>
-    let mut health_history: HashMap<String, Vec<u8>> = HashMap::new();
+    // Health history ring buffer: project_name → VecDeque<u8> (O(1) eviction)
+    let mut health_history: HashMap<String, VecDeque<u8>> = HashMap::new();
 
     // DORA history ring buffer: accumulates correlated events across poll cycles (cap 200).
     let mut dora_history: Vec<CorrelatedEvent> = Vec::new();
@@ -245,7 +251,7 @@ pub async fn run_poller(
             health::compute_project_health_breakdowns(&config.correlations, &pre_events);
         let pre_health_history: Vec<(String, Vec<u8>)> = health_history
             .iter()
-            .map(|(name, history)| (name.clone(), history.clone()))
+            .map(|(name, history)| (name.clone(), history.iter().copied().collect()))
             .collect();
 
         let syncing_snapshot = DataSnapshot {
@@ -432,10 +438,18 @@ pub async fn run_poller(
         let correlated = correlation::correlate_all(&config.correlations, &all_events);
 
         // Merge new correlated events into the DORA history buffer.
-        // Deduplicate by (project_name, commit_sha). Evict oldest when cap exceeded.
+        // Deduplicate by (project_name, commit_sha). When commit_sha is None (e.g. Railway
+        // deployments without a git integration), fall back to timestamp to avoid treating
+        // all None-SHA events as identical — `None == None` is true in Rust.
+        // Evict oldest when cap exceeded.
         for event in &correlated {
             let already_present = dora_history.iter().any(|h| {
-                h.project_name == event.project_name && h.commit_sha == event.commit_sha
+                h.project_name == event.project_name
+                    && match (&h.commit_sha, &event.commit_sha) {
+                        (Some(a), Some(b)) => a == b,
+                        // No commit SHA on either side — use timestamp as fallback identity.
+                        _ => h.timestamp == event.timestamp,
+                    }
             });
             if !already_present {
                 dora_history.push(event.clone());
@@ -459,15 +473,15 @@ pub async fn run_poller(
         // Update health history ring buffer.
         for (name, score) in &health_scores {
             let history = health_history.entry(name.clone()).or_default();
-            history.push(*score);
+            history.push_back(*score);
             if history.len() > HEALTH_HISTORY_CAP {
-                history.remove(0);
+                history.pop_front();
             }
         }
 
         let health_history_snapshot: Vec<(String, Vec<u8>)> = health_history
             .iter()
-            .map(|(name, history)| (name.clone(), history.clone()))
+            .map(|(name, history)| (name.clone(), history.iter().copied().collect()))
             .collect();
 
         let cycle_completed_at = Utc::now();
@@ -602,14 +616,14 @@ mod tests {
 
     #[test]
     fn health_history_ring_buffer_caps_at_limit() {
-        let mut history: HashMap<String, Vec<u8>> = HashMap::new();
+        let mut history: HashMap<String, VecDeque<u8>> = HashMap::new();
 
         // Simulate adding more than HEALTH_HISTORY_CAP entries.
         for i in 0..25 {
             let entry = history.entry("test-project".into()).or_default();
-            entry.push(i as u8);
+            entry.push_back(i as u8);
             if entry.len() > HEALTH_HISTORY_CAP {
-                entry.remove(0);
+                entry.pop_front();
             }
         }
 

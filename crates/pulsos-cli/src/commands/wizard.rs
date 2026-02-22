@@ -61,7 +61,7 @@ pub async fn run_config_wizard(config_path: Option<&Path>) -> Result<()> {
     let mut progress = WizardProgress::default();
 
     let existing_config = load_config(config_path).unwrap_or_default();
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = Arc::new(CacheStore::open_or_temporary()?);
     let store: Arc<dyn CredentialStore> = Arc::new(FallbackStore::new()?);
     let resolver = TokenResolver::new(store.clone(), existing_config.auth.token_detection.clone());
 
@@ -195,7 +195,7 @@ pub async fn run_config_wizard(config_path: Option<&Path>) -> Result<()> {
 }
 
 pub async fn needs_wizard_prompt(config: &PulsosConfig) -> Result<bool> {
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = Arc::new(CacheStore::open_or_temporary()?);
     let store: Arc<dyn CredentialStore> = Arc::new(FallbackStore::new()?);
     let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
     let reports = check_all_platforms_health(config, &resolver, &cache).await;

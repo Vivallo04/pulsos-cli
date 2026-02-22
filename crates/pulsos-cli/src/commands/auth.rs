@@ -87,7 +87,7 @@ pub enum AuthCommand {
 
 pub async fn execute(args: AuthArgs, config_path: Option<&Path>) -> Result<()> {
     let config = load_config(config_path).unwrap_or_default();
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = Arc::new(CacheStore::open_or_temporary()?);
 
     let store: Arc<dyn CredentialStore> = if args.from_env {
         Arc::new(InMemoryStore::new())

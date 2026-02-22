@@ -108,7 +108,18 @@ pub async fn run_worker(
     mut rx: tokio::sync::mpsc::Receiver<ActionRequest>,
     tx: tokio::sync::mpsc::Sender<ActionResult>,
 ) {
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = match CacheStore::open_or_temporary() {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            let _ = tx
+                .send(ActionResult::Error {
+                    context: "init".to_string(),
+                    message: e.user_message(),
+                })
+                .await;
+            return;
+        }
+    };
     let store: Arc<dyn CredentialStore> = match FallbackStore::new() {
         Ok(store) => Arc::new(store),
         Err(err) => {

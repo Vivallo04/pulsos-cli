@@ -216,8 +216,6 @@ mod tests {
     #[test]
     fn env_var_takes_priority_over_keyring() {
         let var_name = PlatformKind::GitHub.env_var_names()[0];
-        let original = std::env::var(var_name).ok();
-        unsafe { std::env::set_var(var_name, "env_priority_token") };
 
         let store = Arc::new(InMemoryStore::new());
         store.set(&PlatformKind::GitHub, "keyring_token").unwrap();
@@ -232,20 +230,16 @@ mod tests {
             },
         );
 
-        let result = resolver.resolve_with_source(&PlatformKind::GitHub);
-
-        // Restore before any assertions that might panic
-        match original {
-            Some(v) => unsafe { std::env::set_var(var_name, v) },
-            None => unsafe { std::env::remove_var(var_name) },
-        }
-
-        let (token, source) = result.expect("should resolve");
-        assert_eq!(token.expose_secret(), "env_priority_token");
-        assert!(
-            matches!(source, TokenSource::EnvVar(_)),
-            "expected EnvVar source, got {source:?}"
-        );
+        temp_env::with_var(var_name, Some("env_priority_token"), || {
+            let (token, source) = resolver
+                .resolve_with_source(&PlatformKind::GitHub)
+                .expect("should resolve");
+            assert_eq!(token.expose_secret(), "env_priority_token");
+            assert!(
+                matches!(source, TokenSource::EnvVar(_)),
+                "expected EnvVar source, got {source:?}"
+            );
+        });
     }
 
     #[test]

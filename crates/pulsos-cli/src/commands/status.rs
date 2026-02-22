@@ -154,7 +154,7 @@ pub async fn execute(
         .await;
     }
 
-    let cache = Arc::new(CacheStore::open_or_temporary());
+    let cache = Arc::new(CacheStore::open_or_temporary()?);
     let store: Arc<dyn CredentialStore> = Arc::new(FallbackStore::new()?);
     let resolver = TokenResolver::new(store, config.auth.token_detection.clone());
 
