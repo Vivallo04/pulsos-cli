@@ -16,6 +16,7 @@ use clap::{Args, Subcommand};
 use pulsos_core::config::types::PulsosConfig;
 
 use crate::daemon::engine::run_engine;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::daemon::notify::NotificationState;
 use crate::daemon::server::{start_server, DaemonStateEvent};
 
