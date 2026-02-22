@@ -26,8 +26,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let entries = app.log_buffer.snapshot();
 
     if entries.is_empty() {
-        let msg =
-            Paragraph::new("No log entries captured yet.").style(theme.t7());
+        let msg = Paragraph::new("No log entries captured yet.").style(theme.t7());
         frame.render_widget(msg, area);
         return;
     }
@@ -85,9 +84,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     let mut table_state = TableState::default();
     if !filtered.is_empty() {
-        table_state.select(Some(
-            app.selected_row.min(filtered.len().saturating_sub(1)),
-        ));
+        table_state.select(Some(app.selected_row.min(filtered.len().saturating_sub(1))));
     }
 
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
@@ -103,7 +100,12 @@ fn draw_filter_bar(
 ) {
     let bar_cols = Layout::horizontal([Constraint::Min(30), Constraint::Length(16)]).split(area);
 
-    let filters = [LogFilter::All, LogFilter::Error, LogFilter::Warn, LogFilter::Info];
+    let filters = [
+        LogFilter::All,
+        LogFilter::Error,
+        LogFilter::Warn,
+        LogFilter::Info,
+    ];
     let mut spans: Vec<Span> = Vec::new();
 
     for (i, filter) in filters.iter().enumerate() {
@@ -242,10 +244,7 @@ mod tests {
 
         let buf = terminal.backend().buffer().clone();
         let text = buffer_to_string(&buf);
-        assert!(
-            text.contains("No log entries"),
-            "Should show empty message"
-        );
+        assert!(text.contains("No log entries"), "Should show empty message");
     }
 
     #[test]
@@ -276,7 +275,10 @@ mod tests {
         let buf = terminal.backend().buffer().clone();
         let text = buffer_to_string(&buf);
         assert!(text.contains("[ERR]"), "Should show ERR filter");
-        assert!(text.contains("connection refused"), "Should show ERROR entries");
+        assert!(
+            text.contains("connection refused"),
+            "Should show ERROR entries"
+        );
     }
 
     fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {

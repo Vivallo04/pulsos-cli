@@ -1,7 +1,7 @@
-use anyhow::Result;
 use crate::commands::ui::screen::{
     screen_confirm, screen_input, screen_multiselect, PromptResult, ScreenSession, ScreenSpec,
 };
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
 use pulsos_core::auth::resolve::TokenResolver;
@@ -199,12 +199,10 @@ async fn sync_command(
             .map(|r| format!("{} ({})", r.display_name, r.group))
             .collect();
         let defaults: Vec<bool> = vec![false; items.len()];
-        let spec = ScreenSpec::new("GitHub Selection")
-            .step(1, 4)
-            .body_lines([
-                "Select GitHub repositories to track.",
-                "All repositories are disabled by default.",
-            ]);
+        let spec = ScreenSpec::new("GitHub Selection").step(1, 4).body_lines([
+            "Select GitHub repositories to track.",
+            "All repositories are disabled by default.",
+        ]);
         let selections = match screen_multiselect(
             &screen,
             &spec,
@@ -232,12 +230,10 @@ async fn sync_command(
             .map(|r| format!("{} ({})", r.display_name, r.group))
             .collect();
         let defaults: Vec<bool> = vec![false; items.len()];
-        let spec = ScreenSpec::new("Railway Selection")
-            .step(2, 4)
-            .body_lines([
-                "Select Railway services to track.",
-                "All services are disabled by default.",
-            ]);
+        let spec = ScreenSpec::new("Railway Selection").step(2, 4).body_lines([
+            "Select Railway services to track.",
+            "All services are disabled by default.",
+        ]);
         let selections = match screen_multiselect(
             &screen,
             &spec,
@@ -271,12 +267,10 @@ async fn sync_command(
             })
             .collect();
         let defaults: Vec<bool> = vec![false; items.len()];
-        let spec = ScreenSpec::new("Vercel Selection")
-            .step(3, 4)
-            .body_lines([
-                "Select Vercel projects to track.",
-                "All projects are disabled by default.",
-            ]);
+        let spec = ScreenSpec::new("Vercel Selection").step(3, 4).body_lines([
+            "Select Vercel projects to track.",
+            "All projects are disabled by default.",
+        ]);
         let selections = match screen_multiselect(
             &screen,
             &spec,
@@ -337,12 +331,8 @@ async fn sync_command(
     let confirm_spec = ScreenSpec::new("Correlation Review")
         .step(4, 4)
         .body_lines(["Review proposed correlations and accept to save config."]);
-    let confirm = match screen_confirm(
-        &screen,
-        &confirm_spec,
-        "Accept these correlations?",
-        true,
-    )? {
+    let confirm = match screen_confirm(&screen, &confirm_spec, "Accept these correlations?", true)?
+    {
         PromptResult {
             cancelled: true, ..
         } => false,
@@ -699,8 +689,8 @@ fn correlate_command(name: &str, config_path: Option<&Path>) -> Result<()> {
     }
 
     println!();
-    let save_spec = ScreenSpec::new("Correlation Edit")
-        .body_lines(["Save this correlation update?"]);
+    let save_spec =
+        ScreenSpec::new("Correlation Edit").body_lines(["Save this correlation update?"]);
     let save = match screen_confirm(&screen, &save_spec, "Save?", true)? {
         PromptResult {
             cancelled: true, ..

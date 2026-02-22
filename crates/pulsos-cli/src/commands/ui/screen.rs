@@ -2,8 +2,7 @@ use std::io::{IsTerminal, Write};
 
 use anyhow::Result;
 use crossterm::{
-    cursor,
-    execute,
+    cursor, execute,
     terminal::{Clear, ClearType},
 };
 

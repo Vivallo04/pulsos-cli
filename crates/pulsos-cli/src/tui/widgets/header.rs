@@ -116,7 +116,10 @@ fn build_platform_badges<'a>(app: &App, theme: &'a Theme) -> Vec<Span<'a>> {
             PlatformHealthState::NoToken => theme.neutral(),
         };
 
-        spans.push(Span::styled(short_platform(platform).to_string(), label_style));
+        spans.push(Span::styled(
+            short_platform(platform).to_string(),
+            label_style,
+        ));
         spans.push(Span::styled(state.icon(), state_style));
     }
 
@@ -224,7 +227,11 @@ mod tests {
     use pulsos_core::config::types::TuiConfig;
 
     fn test_app() -> App {
-        App::new(DataSnapshot::default(), TuiConfig::default(), LogRingBuffer::new())
+        App::new(
+            DataSnapshot::default(),
+            TuiConfig::default(),
+            LogRingBuffer::new(),
+        )
     }
 
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {

@@ -133,25 +133,37 @@ mod tests {
 
     #[test]
     fn cfr_rating_elite() {
-        let m = DoraMetrics { change_failure_rate: 3.0, ..Default::default() };
+        let m = DoraMetrics {
+            change_failure_rate: 3.0,
+            ..Default::default()
+        };
         assert_eq!(m.cfr_rating(), DoraRating::Elite);
     }
 
     #[test]
     fn cfr_rating_high() {
-        let m = DoraMetrics { change_failure_rate: 7.0, ..Default::default() };
+        let m = DoraMetrics {
+            change_failure_rate: 7.0,
+            ..Default::default()
+        };
         assert_eq!(m.cfr_rating(), DoraRating::High);
     }
 
     #[test]
     fn cfr_rating_medium() {
-        let m = DoraMetrics { change_failure_rate: 12.0, ..Default::default() };
+        let m = DoraMetrics {
+            change_failure_rate: 12.0,
+            ..Default::default()
+        };
         assert_eq!(m.cfr_rating(), DoraRating::Medium);
     }
 
     #[test]
     fn cfr_rating_low() {
-        let m = DoraMetrics { change_failure_rate: 20.0, ..Default::default() };
+        let m = DoraMetrics {
+            change_failure_rate: 20.0,
+            ..Default::default()
+        };
         assert_eq!(m.cfr_rating(), DoraRating::Low);
     }
 }

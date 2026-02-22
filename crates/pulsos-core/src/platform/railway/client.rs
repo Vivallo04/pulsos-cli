@@ -148,9 +148,7 @@ impl RailwayClient {
                     m.get("commitHash")
                         .and_then(|v| v.as_str())
                         .map(String::from),
-                    m.get("branch")
-                        .and_then(|v| v.as_str())
-                        .map(String::from),
+                    m.get("branch").and_then(|v| v.as_str()).map(String::from),
                     m.get("commitMessage")
                         .and_then(|v| v.as_str())
                         .map(String::from),
@@ -165,9 +163,9 @@ impl RailwayClient {
         let title = meta_message.or_else(|| service_name.map(String::from));
 
         // Duration from createdAt -> updatedAt
-        let duration_secs = deployment.updated_at.map(|updated| {
-            (updated - deployment.created_at).num_seconds().max(0) as u64
-        });
+        let duration_secs = deployment
+            .updated_at
+            .map(|updated| (updated - deployment.created_at).num_seconds().max(0) as u64);
 
         DeploymentEvent {
             id: deployment.id.clone(),
@@ -206,7 +204,10 @@ impl RailwayClient {
         let ids = match RailwayResourceIds::from_platform_id(platform_id) {
             Some(ids) => ids,
             None => {
-                tracing::warn!(platform_id, "Invalid Railway platform_id format for metrics");
+                tracing::warn!(
+                    platform_id,
+                    "Invalid Railway platform_id format for metrics"
+                );
                 return crate::domain::metrics::ResourceMetrics::default();
             }
         };
@@ -227,10 +228,7 @@ impl RailwayClient {
             ],
         });
 
-        let data: MetricsData = match self
-            .execute_query(METRICS_QUERY, variables)
-            .await
-        {
+        let data: MetricsData = match self.execute_query(METRICS_QUERY, variables).await {
             Ok(d) => d,
             Err(e) => {
                 tracing::debug!(

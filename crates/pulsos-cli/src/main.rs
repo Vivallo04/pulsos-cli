@@ -71,7 +71,10 @@ fn main() {
 
     // `daemon run` must own the main thread for the tray icon event loop.
     // Intercept it before starting the Tokio runtime.
-    if let Some(Commands::Daemon(DaemonArgs { action: DaemonAction::Run })) = &cli.command {
+    if let Some(Commands::Daemon(DaemonArgs {
+        action: DaemonAction::Run,
+    })) = &cli.command
+    {
         let config_path = cli.config.as_deref();
         let config = load_config_sync(config_path);
         if let Err(e) = commands::daemon::run_daemon_main_thread(config) {
@@ -90,7 +93,9 @@ fn main() {
 }
 
 /// Load config synchronously (used before the async runtime is started).
-fn load_config_sync(config_path: Option<&std::path::Path>) -> pulsos_core::config::types::PulsosConfig {
+fn load_config_sync(
+    config_path: Option<&std::path::Path>,
+) -> pulsos_core::config::types::PulsosConfig {
     pulsos_core::config::load_config(config_path).unwrap_or_default()
 }
 
@@ -145,7 +150,15 @@ async fn async_main(cli: Cli) {
                 watch: false,
                 once: false,
             };
-            commands::status::execute(args, cli.format, cli.no_color, config_path, log_buffer, tui_active).await
+            commands::status::execute(
+                args,
+                cli.format,
+                cli.no_color,
+                config_path,
+                log_buffer,
+                tui_active,
+            )
+            .await
         }
     };
 

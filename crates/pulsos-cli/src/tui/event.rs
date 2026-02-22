@@ -1,7 +1,7 @@
 //! TUI event types — the messages flowing through the event loop.
 
-use crossterm::event::KeyEvent;
 use crate::tui::actions::ActionResult;
+use crossterm::event::KeyEvent;
 
 /// Events processed by the main TUI loop.
 pub enum AppEvent {

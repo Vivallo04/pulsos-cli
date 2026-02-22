@@ -14,10 +14,8 @@ impl DoraCalculator {
     /// Cross-platform confidence is not required — a Railway or Vercel success counts
     /// as a deployment even when there is no matching GitHub CI run.
     pub fn compute(events: &[CorrelatedEvent]) -> DoraMetrics {
-        let valid: Vec<&CorrelatedEvent> = events
-            .iter()
-            .filter(|e| Self::is_production(e))
-            .collect();
+        let valid: Vec<&CorrelatedEvent> =
+            events.iter().filter(|e| Self::is_production(e)).collect();
 
         if valid.is_empty() {
             return DoraMetrics::default();
@@ -365,9 +363,7 @@ mod tests {
         );
 
         let result = DoraCalculator::compute(&[failed, restored]);
-        let mttr = result
-            .time_to_restore_service
-            .expect("should have MTTR");
+        let mttr = result.time_to_restore_service.expect("should have MTTR");
         // Allow ±5s tolerance
         assert!(
             mttr.as_secs() >= 3595 && mttr.as_secs() <= 3605,

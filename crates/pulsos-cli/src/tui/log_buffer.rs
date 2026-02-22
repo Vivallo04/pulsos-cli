@@ -335,9 +335,7 @@ mod tests {
             level_hint: Some(Level::ERROR),
             target_hint: None,
         };
-        writer
-            .write_all(b"  ERROR connection refused\n")
-            .unwrap();
+        writer.write_all(b"  ERROR connection refused\n").unwrap();
         writer.flush().unwrap();
 
         let entry = buffer.latest().unwrap();

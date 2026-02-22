@@ -1,12 +1,12 @@
+use crate::commands::ui::screen::{
+    screen_confirm, screen_password_masked, screen_select, PromptResult, ScreenSession,
+    ScreenSeverity, ScreenSpec,
+};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     terminal,
-};
-use crate::commands::ui::screen::{
-    screen_confirm, screen_password_masked, screen_select, PromptResult, ScreenSession,
-    ScreenSeverity, ScreenSpec,
 };
 use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore, InMemoryStore};
 use pulsos_core::auth::detect;
@@ -148,9 +148,19 @@ pub async fn execute(args: AuthArgs, config_path: Option<&Path>) -> Result<()> {
             )
             .await
         }
-        Some(AuthCommand::Logout { platform }) => auth_logout(platform, &store, Some(&screen)).await,
+        Some(AuthCommand::Logout { platform }) => {
+            auth_logout(platform, &store, Some(&screen)).await
+        }
         Some(AuthCommand::Refresh { platform }) => {
-            auth_refresh(platform, &resolver, &store, &cache, args.from_env, Some(&screen)).await
+            auth_refresh(
+                platform,
+                &resolver,
+                &store,
+                &cache,
+                args.from_env,
+                Some(&screen),
+            )
+            .await
         }
     }
 }
@@ -274,7 +284,8 @@ pub(crate) async fn auth_platform(
                     for warning in &status.warnings {
                         lines.push(format!("warning: {warning}"));
                     }
-                    let spec = auth_screen_spec(platform, step, lines, vec![]).severity(ScreenSeverity::Success);
+                    let spec = auth_screen_spec(platform, step, lines, vec![])
+                        .severity(ScreenSeverity::Success);
                     screen.render(&spec)?;
                 } else {
                     println!("  ✓ Authenticated as {}", status.identity);
@@ -378,8 +389,8 @@ pub(crate) async fn auth_platform(
                         for warning in &status.warnings {
                             lines.push(format!("warning: {warning}"));
                         }
-                        let spec =
-                            auth_screen_spec(platform, step, lines, vec![]).severity(ScreenSeverity::Success);
+                        let spec = auth_screen_spec(platform, step, lines, vec![])
+                            .severity(ScreenSeverity::Success);
                         screen.render(&spec)?;
                     } else {
                         println!("  ✓ Authenticated as {}", status.identity);
@@ -450,7 +461,8 @@ pub(crate) async fn auth_platform(
                 for warning in &status.warnings {
                     lines.push(format!("warning: {warning}"));
                 }
-                let spec = auth_screen_spec(platform, step, lines, vec![]).severity(ScreenSeverity::Success);
+                let spec = auth_screen_spec(platform, step, lines, vec![])
+                    .severity(ScreenSeverity::Success);
                 screen.render(&spec)?;
             } else {
                 println!("  ✓ Authenticated as {}", status.identity);

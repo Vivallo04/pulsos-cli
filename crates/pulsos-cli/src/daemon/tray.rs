@@ -29,11 +29,7 @@ impl TrayManager {
         let open_id = open_item.id().clone();
 
         let menu = Menu::new();
-        menu.append_items(&[
-            &open_item,
-            &PredefinedMenuItem::separator(),
-            &quit_item,
-        ])?;
+        menu.append_items(&[&open_item, &PredefinedMenuItem::separator(), &quit_item])?;
 
         let icon = load_embedded_icon(include_bytes!("../../assets/icon-neutral.png"));
         let tray = TrayIconBuilder::new()
@@ -42,7 +38,11 @@ impl TrayManager {
             .with_icon(icon)
             .build()?;
 
-        Ok(Self { tray, quit_id, open_id })
+        Ok(Self {
+            tray,
+            quit_id,
+            open_id,
+        })
     }
 
     /// Update the tray icon and tooltip to reflect the current state.

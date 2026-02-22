@@ -69,7 +69,13 @@ impl OnboardingState {
         PlatformKind::ALL
             .iter()
             .enumerate()
-            .filter_map(|(i, p)| self.platform_selected.get(i).copied().unwrap_or(false).then_some(*p))
+            .filter_map(|(i, p)| {
+                self.platform_selected
+                    .get(i)
+                    .copied()
+                    .unwrap_or(false)
+                    .then_some(*p)
+            })
             .collect()
     }
 

@@ -19,8 +19,8 @@ pub mod theme;
 mod visual_check;
 pub mod widgets;
 
-use std::time::Duration;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self as ct_event, Event as CtEvent};

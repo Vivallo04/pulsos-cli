@@ -1,5 +1,5 @@
-use crate::output::{self, OutputFormat};
 use crate::commands::ui::screen::{screen_confirm, PromptResult, ScreenSession, ScreenSpec};
+use crate::output::{self, OutputFormat};
 use anyhow::Result;
 use clap::Args;
 use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
@@ -113,17 +113,11 @@ pub async fn execute(
 
     if stdout_is_tty && needs_wizard_prompt(&config).await.unwrap_or(false) {
         let session = ScreenSession::new();
-        let spec = ScreenSpec::new("Setup Check")
-            .body_lines([
-                "Some platform checks are incomplete.",
-                "Run setup wizard now to validate and fix configuration?",
-            ]);
-        let should_run = match screen_confirm(
-            &session,
-            &spec,
-            "Run setup wizard now?",
-            true,
-        ) {
+        let spec = ScreenSpec::new("Setup Check").body_lines([
+            "Some platform checks are incomplete.",
+            "Run setup wizard now to validate and fix configuration?",
+        ]);
+        let should_run = match screen_confirm(&session, &spec, "Run setup wizard now?", true) {
             Ok(PromptResult {
                 cancelled: true, ..
             }) => false,

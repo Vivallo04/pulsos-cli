@@ -1,5 +1,7 @@
 use crate::cache::store::CacheStore;
-use crate::domain::deployment::{DeploymentEvent, DeploymentStatus, EventMetadata, JobSummary, Platform};
+use crate::domain::deployment::{
+    DeploymentEvent, DeploymentStatus, EventMetadata, JobSummary, Platform,
+};
 use crate::error::PulsosError;
 use crate::platform::{
     AuthStatus, DiscoveredResource, PlatformAdapter, RateLimitInfo, TrackedResource,
@@ -414,13 +416,11 @@ impl PlatformAdapter for GitHubClient {
             match self.fetch_workflow_runs(&resource.platform_id).await {
                 Ok(runs) => {
                     for (i, run) in runs.iter().enumerate() {
-                        let mut event =
-                            Self::run_to_event(run, &resource.platform_id, false);
+                        let mut event = Self::run_to_event(run, &resource.platform_id, false);
                         // Fetch jobs for the most recent 3 runs to populate pipeline stages
                         if i < 3 {
-                            if let Ok(jobs) = self
-                                .fetch_jobs_for_run(&resource.platform_id, run.id)
-                                .await
+                            if let Ok(jobs) =
+                                self.fetch_jobs_for_run(&resource.platform_id, run.id).await
                             {
                                 event.metadata.jobs =
                                     jobs.iter().map(Self::job_to_summary).collect();

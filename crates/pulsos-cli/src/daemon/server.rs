@@ -3,9 +3,9 @@
 use std::future::IntoFuture;
 
 use axum::{
-    Router,
     response::sse::{Event, Sse},
     routing::get,
+    Router,
 };
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -47,9 +47,7 @@ async fn sse_handler(
 
 /// Bind to an ephemeral port, write the port to `~/.config/pulsos/daemon.port`,
 /// and spawn the server task. Returns the bound port number.
-pub async fn start_server(
-    tx: broadcast::Sender<DaemonStateEvent>,
-) -> anyhow::Result<u16> {
+pub async fn start_server(tx: broadcast::Sender<DaemonStateEvent>) -> anyhow::Result<u16> {
     let app = build_router(tx);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();

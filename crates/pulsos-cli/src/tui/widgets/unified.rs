@@ -27,8 +27,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         || app.data.dora_metrics.lead_time_for_changes.is_some();
 
     let (dora_area, table_area) = if has_dora {
-        let chunks =
-            Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
+        let chunks = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
         (Some(chunks[0]), chunks[1])
     } else {
         (None, area)
@@ -58,7 +57,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         UnifiedSort::ByPlatform => "Plat ▾",
     };
     let header_cells = [
-        "Project", "SHA", "Message", "GitHub CI", "Railway", "Vercel", "Branch", age_header,
+        "Project",
+        "SHA",
+        "Message",
+        "GitHub CI",
+        "Railway",
+        "Vercel",
+        "Branch",
+        age_header,
     ]
     .into_iter()
     .map(|h| Cell::from(h).style(theme.t4()));
@@ -299,12 +305,8 @@ fn draw_dora_banner(
     };
     let row4 = Line::from(Span::styled(window_str, theme.t9()));
 
-    let text = ratatui::text::Text::from(vec![
-        header_line,
-        Line::from(row2),
-        Line::from(row3),
-        row4,
-    ]);
+    let text =
+        ratatui::text::Text::from(vec![header_line, Line::from(row2), Line::from(row3), row4]);
 
     let block = Block::default()
         .borders(Borders::ALL)

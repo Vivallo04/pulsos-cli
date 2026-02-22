@@ -112,7 +112,9 @@ fn draw_project_list(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
 /// Right pane — detail panel with project header, weight bars, and sparkline.
 fn draw_detail_panel(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let block = Block::default().borders(Borders::LEFT).border_style(theme.panel_border());
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(theme.panel_border());
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -215,10 +217,7 @@ fn draw_telemetry(
             .label(format!(" MEM {percent}%  ({used:.0}/{limit:.0} MB)"));
         frame.render_widget(gauge, rows[1]);
     } else {
-        frame.render_widget(
-            Paragraph::new(Span::styled(" MEM —", theme.t8())),
-            rows[1],
-        );
+        frame.render_widget(Paragraph::new(Span::styled(" MEM —", theme.t8())), rows[1]);
     }
 
     // Row 2: CPU Gauge
@@ -232,10 +231,7 @@ fn draw_telemetry(
             .label(format!(" CPU {cpu:.1}%"));
         frame.render_widget(gauge, rows[2]);
     } else {
-        frame.render_widget(
-            Paragraph::new(Span::styled(" CPU —", theme.t8())),
-            rows[2],
-        );
+        frame.render_widget(Paragraph::new(Span::styled(" CPU —", theme.t8())), rows[2]);
     }
 
     // Row 3: Latest ping result
@@ -295,13 +291,31 @@ fn draw_weight_bars(
 
     if let Some(bd) = breakdown {
         if let Some(score) = bd.github_score {
-            lines.push(render_bar_line("GH", bd.github_weight, score, theme.platform_gh, theme));
+            lines.push(render_bar_line(
+                "GH",
+                bd.github_weight,
+                score,
+                theme.platform_gh,
+                theme,
+            ));
         }
         if let Some(score) = bd.railway_score {
-            lines.push(render_bar_line("RW", bd.railway_weight, score, theme.platform_rw, theme));
+            lines.push(render_bar_line(
+                "RW",
+                bd.railway_weight,
+                score,
+                theme.platform_rw,
+                theme,
+            ));
         }
         if let Some(score) = bd.vercel_score {
-            lines.push(render_bar_line("VC", bd.vercel_weight, score, theme.platform_vc, theme));
+            lines.push(render_bar_line(
+                "VC",
+                bd.vercel_weight,
+                score,
+                theme.platform_vc,
+                theme,
+            ));
         }
     } else {
         lines.push(Line::from(Span::styled(" No breakdown data", theme.t8())));
@@ -326,7 +340,10 @@ fn render_bar_line<'a>(
     let bar_empty: String = "░".repeat(empty);
 
     Line::from(vec![
-        Span::styled(format!(" {label}"), ratatui::style::Style::new().fg(accent).bold()),
+        Span::styled(
+            format!(" {label}"),
+            ratatui::style::Style::new().fg(accent).bold(),
+        ),
         Span::styled(format!(" {:>2}%", weight), theme.t8()),
         Span::raw(" "),
         Span::styled(bar_filled, ratatui::style::Style::new().fg(accent)),
@@ -340,13 +357,7 @@ fn render_bar_line<'a>(
 }
 
 /// Render the "RECENT EVENTS" section listing correlated events for this project.
-fn draw_recent_events(
-    frame: &mut Frame,
-    area: Rect,
-    project_name: &str,
-    app: &App,
-    theme: &Theme,
-) {
+fn draw_recent_events(frame: &mut Frame, area: Rect, project_name: &str, app: &App, theme: &Theme) {
     let title = Line::from(Span::styled(" RECENT EVENTS", theme.t4()));
     let mut lines = vec![title];
 
@@ -405,11 +416,8 @@ fn draw_history_sparkline(
     theme: &Theme,
 ) {
     // Split area 50/50: health history on top, latency on bottom.
-    let halves = Layout::vertical([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(area);
+    let halves =
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
 
     // Top half: health score history
     let history = app
@@ -473,13 +481,11 @@ fn draw_history_sparkline(
             .style(ratatui::style::Style::new().fg(theme.platform_rw));
         frame.render_widget(latency_sparkline, halves[1]);
     } else {
-        let msg = Paragraph::new(" No ping history.")
-            .style(theme.t8())
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(theme.panel_border()),
-            );
+        let msg = Paragraph::new(" No ping history.").style(theme.t8()).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(theme.panel_border()),
+        );
         frame.render_widget(msg, halves[1]);
     }
 }
@@ -488,10 +494,7 @@ fn draw_history_sparkline(
 fn render_sparkline_text(project: &str, history: &[(String, Vec<u8>)]) -> String {
     const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
-    let data = history
-        .iter()
-        .find(|(n, _)| n == project)
-        .map(|(_, d)| d);
+    let data = history.iter().find(|(n, _)| n == project).map(|(_, d)| d);
 
     match data {
         Some(points) if !points.is_empty() => {
@@ -606,7 +609,10 @@ mod tests {
         let text = buffer_to_string(&buf);
         assert!(text.contains("my-saas"), "Should show project name");
         assert!(text.contains("95"), "Should show score");
-        assert!(text.contains("PLATFORM WEIGHTS"), "Should show weight bar section");
+        assert!(
+            text.contains("PLATFORM WEIGHTS"),
+            "Should show weight bar section"
+        );
         assert!(
             text.contains("Healthy") || text.contains("Degraded") || text.contains("Critical"),
             "Should show status label in 2-row items"
@@ -618,7 +624,11 @@ mod tests {
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let app = App::new(DataSnapshot::default(), TuiConfig::default(), LogRingBuffer::new());
+        let app = App::new(
+            DataSnapshot::default(),
+            TuiConfig::default(),
+            LogRingBuffer::new(),
+        );
         let theme = Theme::dark();
 
         terminal

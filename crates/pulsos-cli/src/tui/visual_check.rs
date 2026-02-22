@@ -378,10 +378,7 @@ mod tests {
             .draw(|frame| widgets::platform::draw(frame, frame.area(), &app, &theme))
             .unwrap();
         let text = buffer_to_string(terminal.backend().buffer());
-        assert!(
-            text.contains("Build"),
-            "Pipeline should show 'Build' stage"
-        );
+        assert!(text.contains("Build"), "Pipeline should show 'Build' stage");
         assert!(text.contains("Test"), "Pipeline should show 'Test' stage");
         assert!(
             text.contains("Deploy"),

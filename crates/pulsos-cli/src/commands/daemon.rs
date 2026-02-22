@@ -156,7 +156,10 @@ fn run_tray_event_loop(
 // `start` / `stop` / `status` — async, called inside the normal Tokio runtime
 // ──────────────────────────────────────────────────────────────────────────────
 
-pub async fn execute(args: DaemonArgs, config_path: Option<&std::path::Path>) -> anyhow::Result<()> {
+pub async fn execute(
+    args: DaemonArgs,
+    config_path: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
     let _ = config_path; // config loaded in main for `run`; unused for other actions
     match args.action {
         DaemonAction::Run => {

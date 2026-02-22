@@ -145,8 +145,7 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
                     app.onboarding.reset();
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    app.onboarding.platform_cursor =
-                        (app.onboarding.platform_cursor + 1).min(2);
+                    app.onboarding.platform_cursor = (app.onboarding.platform_cursor + 1).min(2);
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     if app.onboarding.platform_cursor > 0 {
@@ -179,14 +178,17 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
                     app.onboarding.reset();
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    app.onboarding.resource_cursor = app.onboarding.resource_cursor.saturating_add(1);
+                    app.onboarding.resource_cursor =
+                        app.onboarding.resource_cursor.saturating_add(1);
                     app.onboarding.clamp_resource_cursor();
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    app.onboarding.resource_cursor = app.onboarding.resource_cursor.saturating_sub(1);
+                    app.onboarding.resource_cursor =
+                        app.onboarding.resource_cursor.saturating_sub(1);
                 }
                 KeyCode::Char(' ') => {
-                    app.onboarding.toggle_resource(app.onboarding.resource_cursor);
+                    app.onboarding
+                        .toggle_resource(app.onboarding.resource_cursor);
                 }
                 KeyCode::Enter => {
                     if app.onboarding.selected_count() == 0 {
@@ -261,7 +263,8 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
         }
         KeyCode::Char('x') => {
             if app.selected_token_from_env() {
-                app.settings_message = Some("cannot remove env token; unset it in shell".to_string());
+                app.settings_message =
+                    Some("cannot remove env token; unset it in shell".to_string());
                 return true;
             }
             let platform = app.selected_settings_platform();
@@ -326,8 +329,8 @@ mod tests {
     use crate::tui::app::{DataSnapshot, InputMode, LogFilter, Tab};
     use crate::tui::log_buffer::{LogEntry, LogRingBuffer};
     use crate::tui::settings_flow::SettingsFlowState;
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use chrono::Utc;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use pulsos_core::auth::PlatformKind;
     use pulsos_core::config::types::TuiConfig;
     use pulsos_core::health::{PlatformHealthDetails, PlatformHealthReport, PlatformHealthState};

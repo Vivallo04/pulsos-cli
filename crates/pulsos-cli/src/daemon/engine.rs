@@ -9,10 +9,7 @@ use crate::daemon::server::DaemonStateEvent;
 use crate::tui::app::DataSnapshot;
 use crate::tui::poll::{run_poller, PollerCommand};
 
-pub async fn run_engine(
-    config: PulsosConfig,
-    broadcast_tx: broadcast::Sender<DaemonStateEvent>,
-) {
+pub async fn run_engine(config: PulsosConfig, broadcast_tx: broadcast::Sender<DaemonStateEvent>) {
     let (watch_tx, mut watch_rx) = watch::channel(DataSnapshot::default());
     // Daemon doesn't issue poller commands — use a dummy channel that's never sent to.
     let (_cmd_tx, cmd_rx): (mpsc::Sender<PollerCommand>, _) = mpsc::channel(8);

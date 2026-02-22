@@ -331,7 +331,10 @@ mod tests {
             },
             is_from_cache: false,
         };
-        assert_eq!(line_to_string(&platform_detail(&event, &theme)), "CI (push)");
+        assert_eq!(
+            line_to_string(&platform_detail(&event, &theme)),
+            "CI (push)"
+        );
     }
 
     #[test]
@@ -356,7 +359,10 @@ mod tests {
             },
             is_from_cache: false,
         };
-        assert_eq!(line_to_string(&platform_detail(&event, &theme)), "api / prod");
+        assert_eq!(
+            line_to_string(&platform_detail(&event, &theme)),
+            "api / prod"
+        );
     }
 
     #[test]

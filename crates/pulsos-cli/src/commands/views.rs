@@ -1,7 +1,7 @@
-use anyhow::Result;
 use crate::commands::ui::screen::{
     screen_confirm, screen_input, screen_multiselect, PromptResult, ScreenSession, ScreenSpec,
 };
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use pulsos_core::config::types::ViewConfig;
 use pulsos_core::config::{default_config_path, load_config, save_config};
@@ -90,7 +90,8 @@ fn list_views(config_path: Option<&Path>) -> Result<()> {
 }
 
 fn show_view(name: &str, config_path: Option<&Path>) -> Result<()> {
-    let config = load_config(config_path).map_err(|_| anyhow::anyhow!("No configuration found."))?;
+    let config =
+        load_config(config_path).map_err(|_| anyhow::anyhow!("No configuration found."))?;
 
     let view = config
         .views
@@ -166,21 +167,16 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
     let desc_spec = ScreenSpec::new("Create View")
         .step(2, 6)
         .body_lines(["Optionally add a description."]);
-    let description: String = match screen_input(
-        &screen,
-        &desc_spec,
-        "Description (optional)",
-        None,
-        true,
-    )? {
-        PromptResult {
-            cancelled: true, ..
-        } => return Ok(()),
-        PromptResult {
-            value: Some(value), ..
-        } => value,
-        _ => String::new(),
-    };
+    let description: String =
+        match screen_input(&screen, &desc_spec, "Description (optional)", None, true)? {
+            PromptResult {
+                cancelled: true, ..
+            } => return Ok(()),
+            PromptResult {
+                value: Some(value), ..
+            } => value,
+            _ => String::new(),
+        };
     let description = description.trim().to_string();
     let description = if description.is_empty() {
         None
@@ -191,12 +187,10 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
     // Platforms (multiselect)
     let platform_options = &["github", "railway", "vercel"];
     let platform_defaults: Vec<bool> = vec![false; platform_options.len()];
-    let platform_spec = ScreenSpec::new("Create View")
-        .step(3, 6)
-        .body_lines([
-            "Select platforms to include in this view.",
-            "All options are disabled by default.",
-        ]);
+    let platform_spec = ScreenSpec::new("Create View").step(3, 6).body_lines([
+        "Select platforms to include in this view.",
+        "All options are disabled by default.",
+    ]);
     let platform_selections = match screen_multiselect(
         &screen,
         &platform_spec,
@@ -221,21 +215,16 @@ fn create_view(config_path: Option<&Path>) -> Result<()> {
     let projects_spec = ScreenSpec::new("Create View")
         .step(4, 6)
         .body_lines(["Projects (comma-separated), or empty for all."]);
-    let projects_input: String = match screen_input(
-        &screen,
-        &projects_spec,
-        "Projects to include",
-        None,
-        true,
-    )? {
-        PromptResult {
-            cancelled: true, ..
-        } => return Ok(()),
-        PromptResult {
-            value: Some(value), ..
-        } => value,
-        _ => String::new(),
-    };
+    let projects_input: String =
+        match screen_input(&screen, &projects_spec, "Projects to include", None, true)? {
+            PromptResult {
+                cancelled: true, ..
+            } => return Ok(()),
+            PromptResult {
+                value: Some(value), ..
+            } => value,
+            _ => String::new(),
+        };
     let projects: Vec<String> = projects_input
         .split(',')
         .map(|s| s.trim().to_string())

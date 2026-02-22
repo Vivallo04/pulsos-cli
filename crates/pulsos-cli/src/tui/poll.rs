@@ -87,19 +87,17 @@ async fn wait_for_next_cycle(
         return Some(false);
     }
 
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep(poll_interval) => return Some(false),
-            msg = command_rx.recv() => {
-                match msg {
-                    Some(PollerCommand::ForceRefresh) => return Some(true),
-                    Some(PollerCommand::ReplaceConfig(new_config)) => {
-                        *config = new_config;
-                        *resources = PlatformResources::from_correlations(&config.correlations);
-                        return Some(true);
-                    }
-                    None => return None,
+    tokio::select! {
+        _ = tokio::time::sleep(poll_interval) => Some(false),
+        msg = command_rx.recv() => {
+            match msg {
+                Some(PollerCommand::ForceRefresh) => Some(true),
+                Some(PollerCommand::ReplaceConfig(new_config)) => {
+                    *config = new_config;
+                    *resources = PlatformResources::from_correlations(&config.correlations);
+                    Some(true)
                 }
+                None => None,
             }
         }
     }
@@ -218,9 +216,9 @@ pub async fn run_poller(
         )
         .await
         {
-                Some(v) => v,
-                None => return, // channel closed, UI exited
-            };
+            Some(v) => v,
+            None => return, // channel closed, UI exited
+        };
 
         while let Ok(command) = command_rx.try_recv() {
             match command {
@@ -402,9 +400,7 @@ pub async fn run_poller(
                             .map(|id| {
                                 corr.vercel_project.as_deref() == Some(id)
                                     || corr.railway_project.as_deref() == Some(id)
-                                    || id.contains(
-                                        corr.vercel_project.as_deref().unwrap_or(""),
-                                    )
+                                    || id.contains(corr.vercel_project.as_deref().unwrap_or(""))
                             })
                             .unwrap_or(false)
                     })
@@ -529,7 +525,9 @@ async fn stream_from_daemon(port: u16, tx: watch::Sender<DataSnapshot>) {
     use crate::daemon::server::DaemonStateEvent;
 
     let url = format!("http://127.0.0.1:{port}/api/stream");
-    let Ok(resp) = reqwest::get(&url).await else { return };
+    let Ok(resp) = reqwest::get(&url).await else {
+        return;
+    };
     let mut stream = resp.bytes_stream();
 
     while let Some(Ok(chunk)) = stream.next().await {

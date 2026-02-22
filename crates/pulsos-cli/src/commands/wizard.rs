@@ -2,10 +2,10 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
 use crate::commands::ui::screen::{
     screen_confirm, screen_multiselect, PromptResult, ScreenSession, ScreenSeverity, ScreenSpec,
 };
+use anyhow::Result;
 use pulsos_core::auth::credential_store::{CredentialStore, FallbackStore};
 use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::PlatformKind;
@@ -120,8 +120,16 @@ pub async fn run_config_wizard(config_path: Option<&Path>) -> Result<()> {
     for (i, platform) in selected_platforms.iter().enumerate() {
         let step = (i + 1, total.max(1));
         loop {
-            match auth_platform(*platform, &store, &cache, false, None, Some(&screen), Some(step))
-                .await
+            match auth_platform(
+                *platform,
+                &store,
+                &cache,
+                false,
+                None,
+                Some(&screen),
+                Some(step),
+            )
+            .await
             {
                 Ok(()) => break,
                 Err(e) => {

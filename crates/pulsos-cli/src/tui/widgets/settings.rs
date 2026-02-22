@@ -46,8 +46,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         return;
     }
 
-    let chunks = Layout::horizontal([Constraint::Length(28), Constraint::Min(40)])
-        .split(area);
+    let chunks = Layout::horizontal([Constraint::Length(28), Constraint::Min(40)]).split(area);
 
     let header_cells = ["Platform", "State"]
         .iter()
@@ -81,17 +80,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         })
         .collect();
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(10),
-            Constraint::Min(14),
-        ],
-    )
-    .header(header)
-    .block(Block::default().borders(Borders::NONE))
-    .row_highlight_style(theme.selected_row())
-    .highlight_symbol("▶ ");
+    let table = Table::new(rows, [Constraint::Length(10), Constraint::Min(14)])
+        .header(header)
+        .block(Block::default().borders(Borders::NONE))
+        .row_highlight_style(theme.selected_row())
+        .highlight_symbol("▶ ");
 
     let mut state = TableState::default();
     state.select(Some(
@@ -109,11 +102,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .style(theme.t8())
             .wrap(Wrap { trim: false })
             .block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(theme.panel_border())
-                .title(Span::styled(" Auth & Onboard ", theme.t6())),
-        );
+                Block::default()
+                    .borders(Borders::LEFT)
+                    .border_style(theme.panel_border())
+                    .title(Span::styled(" Auth & Onboard ", theme.t6())),
+            );
         frame.render_widget(detail_widget, chunks[1]);
     }
 }
@@ -170,7 +163,10 @@ fn render_detail(report: &PlatformHealthReport, app: &App) -> String {
         SettingsFlowState::TokenEntry => {
             lines.push(String::new());
             lines.push(copy::FLOW_TOKEN_INPUT.to_string());
-            lines.push(format!("  {}", "•".repeat(app.token_input.chars().count().min(64))));
+            lines.push(format!(
+                "  {}",
+                "•".repeat(app.token_input.chars().count().min(64))
+            ));
             lines.push(format!("  {}", copy::FLOW_TOKEN_HINT));
             lines.push("  Esc to cancel".to_string());
         }
@@ -187,12 +183,21 @@ fn render_detail(report: &PlatformHealthReport, app: &App) -> String {
                 } else {
                     " "
                 };
-                let checked = if app.onboarding.platform_selected.get(idx).copied().unwrap_or(false) {
+                let checked = if app
+                    .onboarding
+                    .platform_selected
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(false)
+                {
                     "x"
                 } else {
                     " "
                 };
-                lines.push(format!(" {pointer} [{checked}] {}", platform.display_name()));
+                lines.push(format!(
+                    " {pointer} [{checked}] {}",
+                    platform.display_name()
+                ));
             }
             lines.push("  Space toggle  Enter discover  Esc cancel".to_string());
         }
@@ -258,11 +263,25 @@ fn render_detail(report: &PlatformHealthReport, app: &App) -> String {
 fn render_resource_selection(lines: &mut Vec<String>, app: &App) {
     let mut flat_index = 0usize;
     for item in &app.onboarding.github {
-        push_resource_line(lines, app, flat_index, "GH", &item.resource.display_name, item.selected);
+        push_resource_line(
+            lines,
+            app,
+            flat_index,
+            "GH",
+            &item.resource.display_name,
+            item.selected,
+        );
         flat_index += 1;
     }
     for item in &app.onboarding.railway {
-        push_resource_line(lines, app, flat_index, "RW", &item.resource.display_name, item.selected);
+        push_resource_line(
+            lines,
+            app,
+            flat_index,
+            "RW",
+            &item.resource.display_name,
+            item.selected,
+        );
         flat_index += 1;
     }
     for item in &app.onboarding.vercel {
@@ -293,7 +312,10 @@ fn push_resource_line(
         " "
     };
     let checked = if selected { "x" } else { " " };
-    lines.push(format!(" {pointer} [{checked}] {prefix} {}", truncate(display, 80)));
+    lines.push(format!(
+        " {pointer} [{checked}] {prefix} {}",
+        truncate(display, 80)
+    ));
 }
 
 fn truncate(s: &str, max: usize) -> String {

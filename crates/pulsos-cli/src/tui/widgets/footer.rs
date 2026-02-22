@@ -38,18 +38,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_widget(Paragraph::new(help_line), top[0]);
 
     let status = format_sync_status(app);
-    let right =
-        Paragraph::new(Line::from(Span::styled(status, theme.keybind_desc())))
-            .alignment(ratatui::layout::Alignment::Right);
+    let right = Paragraph::new(Line::from(Span::styled(status, theme.keybind_desc())))
+        .alignment(ratatui::layout::Alignment::Right);
     frame.render_widget(right, top[1]);
 
     // ── Row 1: warning or latest log entry ──
     let max_msg = (rows[1].width as usize).saturating_sub(6); // room for "WRN "
     let warning_count = app.data.warnings.len();
     let bottom_spans: Vec<Span> = if warning_count > 0 {
-        let mut spans = vec![
-            Span::styled(format!("⚠ {warning_count}"), theme.warning()),
-        ];
+        let mut spans = vec![Span::styled(format!("⚠ {warning_count}"), theme.warning())];
         if let Some(last) = app.data.warnings.last() {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(truncate(last, max_msg), theme.t8()));
@@ -57,12 +54,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         spans
     } else if let Some(entry) = app.log_buffer.latest() {
         let abbrev = super::logs::level_abbrev(&entry.level);
-        vec![
-            Span::styled(
-                format!("{abbrev} {}", truncate(&entry.message, max_msg)),
-                theme.t8(),
-            ),
-        ]
+        vec![Span::styled(
+            format!("{abbrev} {}", truncate(&entry.message, max_msg)),
+            theme.t8(),
+        )]
     } else {
         vec![]
     };
@@ -219,7 +214,11 @@ mod tests {
     use pulsos_core::config::types::TuiConfig;
 
     fn test_app() -> App {
-        App::new(DataSnapshot::default(), TuiConfig::default(), LogRingBuffer::new())
+        App::new(
+            DataSnapshot::default(),
+            TuiConfig::default(),
+            LogRingBuffer::new(),
+        )
     }
 
     #[test]

@@ -9,7 +9,9 @@ pub struct NotificationState {
 
 impl NotificationState {
     pub fn new() -> Self {
-        Self { prev_snapshot: None }
+        Self {
+            prev_snapshot: None,
+        }
     }
 
     /// Compare `current` against the previous snapshot and fire notifications
@@ -42,9 +44,5 @@ impl NotificationState {
 
 fn send_notification(title: &str, body: &str) {
     // Never panic if notifications fail (e.g. no notification daemon on Linux).
-    Notification::new()
-        .summary(title)
-        .body(body)
-        .show()
-        .ok();
+    Notification::new().summary(title).body(body).show().ok();
 }

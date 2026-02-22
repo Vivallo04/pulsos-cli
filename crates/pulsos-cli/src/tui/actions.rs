@@ -6,8 +6,8 @@ use pulsos_core::auth::resolve::TokenResolver;
 use pulsos_core::auth::validate::validate_token;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
-use pulsos_core::config::{load_config, save_config};
 use pulsos_core::config::types::PulsosConfig;
+use pulsos_core::config::{load_config, save_config};
 use pulsos_core::platform::github::client::GitHubClient;
 use pulsos_core::platform::railway::client::RailwayClient;
 use pulsos_core::platform::vercel::client::VercelClient;
@@ -63,9 +63,9 @@ impl std::fmt::Debug for ActionRequest {
             Self::BuildCorrelationPreview { .. } => f
                 .debug_struct("BuildCorrelationPreview")
                 .finish_non_exhaustive(),
-            Self::ApplyCorrelations { .. } => f
-                .debug_struct("ApplyCorrelations")
-                .finish_non_exhaustive(),
+            Self::ApplyCorrelations { .. } => {
+                f.debug_struct("ApplyCorrelations").finish_non_exhaustive()
+            }
         }
     }
 }
@@ -229,10 +229,9 @@ async fn handle_request(
                                     .filter(|r| !r.archived && !r.disabled)
                                     .collect();
                             }
-                            Err(err) => payload.warnings.push(format!(
-                                "GitHub discovery failed: {}",
-                                err.user_message()
-                            )),
+                            Err(err) => payload
+                                .warnings
+                                .push(format!("GitHub discovery failed: {}", err.user_message())),
                         }
                     }
                     PlatformKind::Railway => {
@@ -244,10 +243,9 @@ async fn handle_request(
                                     .filter(|r| !r.archived && !r.disabled)
                                     .collect();
                             }
-                            Err(err) => payload.warnings.push(format!(
-                                "Railway discovery failed: {}",
-                                err.user_message()
-                            )),
+                            Err(err) => payload
+                                .warnings
+                                .push(format!("Railway discovery failed: {}", err.user_message())),
                         }
                     }
                     PlatformKind::Vercel => {
@@ -259,10 +257,9 @@ async fn handle_request(
                                     .filter(|(r, _)| !r.archived && !r.disabled)
                                     .collect();
                             }
-                            Err(err) => payload.warnings.push(format!(
-                                "Vercel discovery failed: {}",
-                                err.user_message()
-                            )),
+                            Err(err) => payload
+                                .warnings
+                                .push(format!("Vercel discovery failed: {}", err.user_message())),
                         }
                     }
                 }
@@ -277,7 +274,9 @@ async fn handle_request(
                 lines.push(format!("{} ({:?})", candidate.name, candidate.confidence));
             }
             if lines.is_empty() {
-                lines.push("No correlation candidates produced from selected resources.".to_string());
+                lines.push(
+                    "No correlation candidates produced from selected resources.".to_string(),
+                );
             }
             ActionResult::CorrelationPreview { lines }
         }
@@ -311,7 +310,9 @@ async fn handle_request(
     }
 }
 
-fn build_candidates(discovery: &DiscoveryPayload) -> Vec<pulsos_core::sync::correlate::CorrelationCandidate> {
+fn build_candidates(
+    discovery: &DiscoveryPayload,
+) -> Vec<pulsos_core::sync::correlate::CorrelationCandidate> {
     let discovery_results = DiscoveryResults {
         github: discovery.github.clone(),
         railway: discovery.railway.clone(),
