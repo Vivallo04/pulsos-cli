@@ -8,8 +8,8 @@
 
 use std::time::{Duration, Instant};
 
-use crate::error::PulsosError;
 use crate::domain::metrics::EndpointHealth;
+use crate::error::PulsosError;
 
 /// Lightweight HTTP prober. Reuses a single `reqwest::Client` across pings.
 pub struct PingEngine {
@@ -25,9 +25,7 @@ impl PingEngine {
             .user_agent("pulsos-ping/0.1.0")
             .build()
             .map_err(|e| {
-                PulsosError::Other(anyhow::anyhow!(
-                    "Failed to build ping HTTP client: {e}"
-                ))
+                PulsosError::Other(anyhow::anyhow!("Failed to build ping HTTP client: {e}"))
             })?;
 
         Ok(Self { client })
