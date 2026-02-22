@@ -200,7 +200,7 @@ pub async fn run_poller(
     let mut health_history: HashMap<String, VecDeque<u8>> = HashMap::new();
 
     // DORA history ring buffer: accumulates correlated events across poll cycles (cap 200).
-    let mut dora_history: Vec<CorrelatedEvent> = Vec::new();
+    let mut dora_history: VecDeque<CorrelatedEvent> = VecDeque::new();
 
     // Telemetry state: project_name → ProjectTelemetry (Railway metrics + pings)
     let mut last_telemetry: HashMap<String, ProjectTelemetry> = HashMap::new();
@@ -408,14 +408,7 @@ pub async fn run_poller(
                             })
                             .unwrap_or(false)
                     })
-                    .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()))
-                    .or_else(|| {
-                        // Fallback: any recent event that belongs to this correlation
-                        last_vercel_events
-                            .iter()
-                            .chain(last_railway_events.iter())
-                            .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()))
-                    });
+                    .find_map(|e| e.url.clone().or_else(|| e.metadata.preview_url.clone()));
 
                 if let Some(u) = url {
                     let ping = ping_engine.ping(&u).await;
@@ -452,16 +445,15 @@ pub async fn run_poller(
                     }
             });
             if !already_present {
-                dora_history.push(event.clone());
+                dora_history.push_back(event.clone());
+                if dora_history.len() > DORA_HISTORY_CAP {
+                    dora_history.pop_front();
+                }
             }
-        }
-        if dora_history.len() > DORA_HISTORY_CAP {
-            let excess = dora_history.len() - DORA_HISTORY_CAP;
-            dora_history.drain(0..excess);
         }
 
         // Compute aggregate DORA metrics from accumulated history.
-        let dora_metrics = DoraCalculator::compute(&dora_history);
+        let dora_metrics = DoraCalculator::compute(dora_history.make_contiguous());
         let dora_history_count = dora_history.len();
 
         // Compute health scores and breakdowns per correlation.

@@ -45,15 +45,16 @@ impl VercelClient {
         }
     }
 
-    fn auth_headers(&self) -> reqwest::header::HeaderMap {
+    fn auth_headers(&self) -> Result<reqwest::header::HeaderMap, PulsosError> {
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "Authorization",
-            format!("Bearer {}", self.token.expose_secret())
-                .parse()
-                .unwrap(),
-        );
-        headers
+        let auth_value = format!("Bearer {}", self.token.expose_secret())
+            .parse()
+            .map_err(|e| PulsosError::AuthFailed {
+                platform: "Vercel".into(),
+                reason: format!("Invalid token format for Authorization header: {e}"),
+            })?;
+        headers.insert("Authorization", auth_value);
+        Ok(headers)
     }
 
     async fn parse_json<T: serde::de::DeserializeOwned>(
@@ -79,7 +80,7 @@ impl VercelClient {
             .client
             .get(format!("{}/v6/deployments", self.base_url))
             .query(&[("projectId", project_id), ("limit", "5")])
-            .headers(self.auth_headers());
+            .headers(self.auth_headers()?);
 
         let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
@@ -178,7 +179,7 @@ impl VercelClient {
         let mut results = Vec::new();
 
         let teams_url = format!("{}/v2/teams", self.base_url);
-        let req = self.client.get(&teams_url).headers(self.auth_headers());
+        let req = self.client.get(&teams_url).headers(self.auth_headers()?);
 
         let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
@@ -196,7 +197,7 @@ impl VercelClient {
 
         for team in &teams.teams {
             let projects_url = format!("{}/v9/projects?teamId={}", self.base_url, team.id);
-            let req = self.client.get(&projects_url).headers(self.auth_headers());
+            let req = self.client.get(&projects_url).headers(self.auth_headers()?);
 
             let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
@@ -276,7 +277,7 @@ impl PlatformAdapter for VercelClient {
 
         // Fetch teams
         let teams_url = format!("{}/v2/teams", self.base_url);
-        let req = self.client.get(&teams_url).headers(self.auth_headers());
+        let req = self.client.get(&teams_url).headers(self.auth_headers()?);
 
         let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
@@ -294,7 +295,7 @@ impl PlatformAdapter for VercelClient {
 
         for team in &teams.teams {
             let projects_url = format!("{}/v9/projects?teamId={}", self.base_url, team.id);
-            let req = self.client.get(&projects_url).headers(self.auth_headers());
+            let req = self.client.get(&projects_url).headers(self.auth_headers()?);
 
             let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
@@ -319,7 +320,7 @@ impl PlatformAdapter for VercelClient {
 
     async fn validate_auth(&self) -> Result<AuthStatus, PulsosError> {
         let url = format!("{}/v2/user", self.base_url);
-        let req = self.client.get(&url).headers(self.auth_headers());
+        let req = self.client.get(&url).headers(self.auth_headers()?);
 
         let resp = crate::platform::retry::send_with_retry(req, "Vercel").await?;
 
