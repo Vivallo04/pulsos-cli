@@ -22,7 +22,7 @@ pub struct RailwayClient {
 }
 
 impl RailwayClient {
-    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Self {
+    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Result<Self, PulsosError> {
         Self::new_with_base_url(
             token,
             "https://backboard.railway.com/graphql/v2".into(),
@@ -34,20 +34,22 @@ impl RailwayClient {
         token: SecretString,
         base_url: String,
         cache: Arc<CacheStore>,
-    ) -> Self {
+    ) -> Result<Self, PulsosError> {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .expect("Failed to build HTTP client");
+            .map_err(|e| {
+                PulsosError::Other(anyhow::anyhow!("Failed to build Railway client: {e}"))
+            })?;
 
-        Self {
+        Ok(Self {
             client,
             base_url,
             token,
             cache,
-        }
+        })
     }
 
     async fn execute_query<T: serde::de::DeserializeOwned>(

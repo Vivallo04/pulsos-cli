@@ -93,7 +93,7 @@ pub async fn run_tui(
     tokio::spawn(async move {
         while let Some(result) = action_result_rx.recv().await {
             if action_event_tx
-                .send(AppEvent::ActionResult(result))
+                .send(AppEvent::ActionResult(Box::new(result)))
                 .await
                 .is_err()
             {
@@ -191,9 +191,9 @@ pub async fn run_tui(
                 app.terminal_size = (w, h);
             }
             AppEvent::ActionResult(result) => {
-                let outcome = app.handle_action_result(result);
+                let outcome = app.handle_action_result(*result);
                 if let Some(config) = outcome.replace_config {
-                    let _ = poller_tx.try_send(PollerCommand::ReplaceConfig(config));
+                    let _ = poller_tx.try_send(PollerCommand::ReplaceConfig(Box::new(config)));
                 }
                 if outcome.force_refresh {
                     let _ = poller_tx.try_send(PollerCommand::ForceRefresh);

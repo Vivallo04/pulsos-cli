@@ -62,8 +62,8 @@ fn list_views(config_path: Option<&Path>) -> Result<()> {
     }
 
     println!(
-        "{:<20}  {:<30}  {:<20}  {:<20}  {}",
-        "Name", "Description", "Projects", "Platforms", "Branch"
+        "{:<20}  {:<30}  {:<20}  {:<20}  Branch",
+        "Name", "Description", "Projects", "Platforms"
     );
     println!("{}", "─".repeat(100));
 

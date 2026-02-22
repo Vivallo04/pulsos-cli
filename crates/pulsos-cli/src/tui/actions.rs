@@ -95,7 +95,7 @@ pub enum ActionResult {
         added: usize,
         updated: usize,
         total: usize,
-        config: PulsosConfig,
+        config: Box<PulsosConfig>,
     },
     Error {
         context: String,
@@ -221,45 +221,60 @@ async fn handle_request(
 
                 match platform {
                     PlatformKind::GitHub => {
-                        let client = GitHubClient::new(token, cache.clone());
-                        match client.discover().await {
-                            Ok(resources) => {
-                                payload.github = resources
-                                    .into_iter()
-                                    .filter(|r| !r.archived && !r.disabled)
-                                    .collect();
-                            }
+                        match GitHubClient::new(token, cache.clone()) {
+                            Ok(client) => match client.discover().await {
+                                Ok(resources) => {
+                                    payload.github = resources
+                                        .into_iter()
+                                        .filter(|r| !r.archived && !r.disabled)
+                                        .collect();
+                                }
+                                Err(err) => payload.warnings.push(format!(
+                                    "GitHub discovery failed: {}",
+                                    err.user_message()
+                                )),
+                            },
                             Err(err) => payload
                                 .warnings
-                                .push(format!("GitHub discovery failed: {}", err.user_message())),
+                                .push(format!("GitHub init failed: {}", err.user_message())),
                         }
                     }
                     PlatformKind::Railway => {
-                        let client = RailwayClient::new(token, cache.clone());
-                        match client.discover().await {
-                            Ok(resources) => {
-                                payload.railway = resources
-                                    .into_iter()
-                                    .filter(|r| !r.archived && !r.disabled)
-                                    .collect();
-                            }
+                        match RailwayClient::new(token, cache.clone()) {
+                            Ok(client) => match client.discover().await {
+                                Ok(resources) => {
+                                    payload.railway = resources
+                                        .into_iter()
+                                        .filter(|r| !r.archived && !r.disabled)
+                                        .collect();
+                                }
+                                Err(err) => payload.warnings.push(format!(
+                                    "Railway discovery failed: {}",
+                                    err.user_message()
+                                )),
+                            },
                             Err(err) => payload
                                 .warnings
-                                .push(format!("Railway discovery failed: {}", err.user_message())),
+                                .push(format!("Railway init failed: {}", err.user_message())),
                         }
                     }
                     PlatformKind::Vercel => {
-                        let client = VercelClient::new(token, cache.clone());
-                        match client.discover_with_links().await {
-                            Ok(resources) => {
-                                payload.vercel = resources
-                                    .into_iter()
-                                    .filter(|(r, _)| !r.archived && !r.disabled)
-                                    .collect();
-                            }
+                        match VercelClient::new(token, cache.clone()) {
+                            Ok(client) => match client.discover_with_links().await {
+                                Ok(resources) => {
+                                    payload.vercel = resources
+                                        .into_iter()
+                                        .filter(|(r, _)| !r.archived && !r.disabled)
+                                        .collect();
+                                }
+                                Err(err) => payload.warnings.push(format!(
+                                    "Vercel discovery failed: {}",
+                                    err.user_message()
+                                )),
+                            },
                             Err(err) => payload
                                 .warnings
-                                .push(format!("Vercel discovery failed: {}", err.user_message())),
+                                .push(format!("Vercel init failed: {}", err.user_message())),
                         }
                     }
                 }
@@ -304,7 +319,7 @@ async fn handle_request(
                 added,
                 updated,
                 total: merged.correlations.len(),
-                config: merged,
+                config: Box::new(merged),
             }
         }
     }

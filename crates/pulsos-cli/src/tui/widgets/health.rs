@@ -550,44 +550,48 @@ mod tests {
     use ratatui::Terminal;
 
     fn test_app_with_health() -> App {
-        let mut data = DataSnapshot::default();
-        data.health_scores = vec![
-            ("my-saas".into(), 95),
-            ("api-server".into(), 75),
-            ("frontend".into(), 50),
-        ];
-        data.health_breakdowns = vec![
-            (
-                "my-saas".into(),
-                HealthBreakdown {
-                    total: 95,
-                    github_score: Some(90),
-                    railway_score: Some(100),
-                    vercel_score: Some(100),
-                    github_weight: 40,
-                    railway_weight: 35,
-                    vercel_weight: 25,
-                },
-            ),
-            (
-                "api-server".into(),
-                HealthBreakdown {
-                    total: 75,
-                    github_score: Some(70),
-                    railway_score: Some(80),
-                    vercel_score: None,
-                    github_weight: 53,
-                    railway_weight: 47,
-                    vercel_weight: 0,
-                },
-            ),
-        ];
-        data.health_history = vec![
-            ("my-saas".into(), vec![80, 85, 90, 92, 95]),
-            ("api-server".into(), vec![70, 60, 55, 60, 65]),
-        ];
-        let mut config = TuiConfig::default();
-        config.show_sparklines = true;
+        let data = DataSnapshot {
+            health_scores: vec![
+                ("my-saas".into(), 95),
+                ("api-server".into(), 75),
+                ("frontend".into(), 50),
+            ],
+            health_breakdowns: vec![
+                (
+                    "my-saas".into(),
+                    HealthBreakdown {
+                        total: 95,
+                        github_score: Some(90),
+                        railway_score: Some(100),
+                        vercel_score: Some(100),
+                        github_weight: 40,
+                        railway_weight: 35,
+                        vercel_weight: 25,
+                    },
+                ),
+                (
+                    "api-server".into(),
+                    HealthBreakdown {
+                        total: 75,
+                        github_score: Some(70),
+                        railway_score: Some(80),
+                        vercel_score: None,
+                        github_weight: 53,
+                        railway_weight: 47,
+                        vercel_weight: 0,
+                    },
+                ),
+            ],
+            health_history: vec![
+                ("my-saas".into(), vec![80, 85, 90, 92, 95]),
+                ("api-server".into(), vec![70, 60, 55, 60, 65]),
+            ],
+            ..Default::default()
+        };
+        let config = TuiConfig {
+            show_sparklines: true,
+            ..Default::default()
+        };
         App::new(data, config, LogRingBuffer::new())
     }
 

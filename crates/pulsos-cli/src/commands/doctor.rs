@@ -245,27 +245,32 @@ async fn check_rate_limits(resolver: &TokenResolver, cache: &Arc<CacheStore>) ->
 
     // GitHub has visible rate limits
     if let Some(token) = resolver.resolve(&PlatformKind::GitHub) {
-        let client = GitHubClient::new(token, cache.clone());
-        match client.rate_limit_status().await {
-            Ok(info) => {
-                let value = format!(
-                    "{} / {} remaining (resets {})",
-                    info.remaining,
-                    info.limit,
-                    info.resets_at.format("%H:%M"),
-                );
-                if info.remaining < info.limit / 10 {
-                    results.push(CheckResult::warning("GitHub", value));
-                } else {
-                    results.push(CheckResult::ok("GitHub", value));
+        match GitHubClient::new(token, cache.clone()) {
+            Ok(client) => match client.rate_limit_status().await {
+                Ok(info) => {
+                    let value = format!(
+                        "{} / {} remaining (resets {})",
+                        info.remaining,
+                        info.limit,
+                        info.resets_at.format("%H:%M"),
+                    );
+                    if info.remaining < info.limit / 10 {
+                        results.push(CheckResult::warning("GitHub", value));
+                    } else {
+                        results.push(CheckResult::ok("GitHub", value));
+                    }
                 }
-            }
-            Err(e) => {
-                results.push(CheckResult::warning(
-                    "GitHub",
-                    format!("Unable to fetch rate limits: {e}"),
-                ));
-            }
+                Err(e) => {
+                    results.push(CheckResult::warning(
+                        "GitHub",
+                        format!("Unable to fetch rate limits: {e}"),
+                    ));
+                }
+            },
+            Err(e) => results.push(CheckResult::warning(
+                "GitHub",
+                format!("Unable to initialize client: {e}"),
+            )),
         }
     } else {
         results.push(CheckResult::skipped("GitHub", "skipped (no token)"));

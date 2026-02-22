@@ -27,13 +27,14 @@ impl RateLimitBudget {
     /// Returns percentage of requests remaining (0.0–100.0).
     pub fn pct_remaining(&self) -> f64 {
         if self.limit == 0 {
-            return 100.0;
+            // Unknown budget; treat as empty to avoid aggressive polling.
+            return 0.0;
         }
         self.remaining as f64 / self.limit as f64 * 100.0
     }
 
     pub fn is_exhausted(&self) -> bool {
-        self.remaining == 0
+        self.limit > 0 && self.remaining == 0
     }
 
     pub fn secs_until_reset(&self) -> u64 {

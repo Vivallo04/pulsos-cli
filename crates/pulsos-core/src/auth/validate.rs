@@ -24,15 +24,15 @@ pub async fn validate_token(
 ) -> Result<AuthStatus, PulsosError> {
     let mut status = match platform {
         PlatformKind::GitHub => {
-            let client = GitHubClient::new(token, cache.clone());
+            let client = GitHubClient::new(token, cache.clone())?;
             client.validate_auth().await?
         }
         PlatformKind::Railway => {
-            let client = RailwayClient::new(token, cache.clone());
+            let client = RailwayClient::new(token, cache.clone())?;
             client.validate_auth().await?
         }
         PlatformKind::Vercel => {
-            let client = VercelClient::new(token, cache.clone());
+            let client = VercelClient::new(token, cache.clone())?;
             client.validate_auth().await?
         }
     };

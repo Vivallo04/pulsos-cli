@@ -56,6 +56,20 @@ pub async fn start_server(tx: broadcast::Sender<DaemonStateEvent>) -> anyhow::Re
     if let Some(config_dir) = dirs::config_dir() {
         let pulsos_dir = config_dir.join("pulsos");
         std::fs::create_dir_all(&pulsos_dir)?;
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(pulsos_dir.join("daemon.port"))?
+                .write_all(port.to_string().as_bytes())?;
+        }
+        #[cfg(not(unix))]
         std::fs::write(pulsos_dir.join("daemon.port"), port.to_string())?;
     }
 

@@ -1,11 +1,11 @@
 //! `pulsos daemon [run|start|stop|status]` — persistent background daemon.
 //!
 //! Architecture:
-//!  - `run`   — foreground: starts the tray icon on the main thread and
-//!              spawns a Tokio runtime for the engine + SSE server.
-//!  - `start` — background: re-execs `daemon run` as a detached process.
-//!  - `stop`  — reads the PID file and sends SIGTERM.
-//!  - `status`— checks the `/health` endpoint and prints the port.
+//! - `run` — foreground: starts the tray icon on the main thread and
+//!   spawns a Tokio runtime for the engine + SSE server.
+//! - `start` — background: re-execs `daemon run` as a detached process.
+//! - `stop` — reads the PID file and sends SIGTERM.
+//! - `status` — checks the `/health` endpoint and prints the port.
 
 use std::path::PathBuf;
 use std::process::Stdio;

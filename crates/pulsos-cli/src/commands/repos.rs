@@ -119,7 +119,7 @@ async fn sync_command(
     // ── GitHub ──
     if let Some(token) = resolver.resolve(&PlatformKind::GitHub) {
         print!("  GitHub: scanning... ");
-        let client = GitHubClient::new(token, cache.clone());
+        let client = GitHubClient::new(token, cache.clone())?;
         match client.discover().await {
             Ok(resources) => {
                 let active: Vec<_> = resources
@@ -138,7 +138,7 @@ async fn sync_command(
     // ── Railway ──
     if let Some(token) = resolver.resolve(&PlatformKind::Railway) {
         print!("  Railway: scanning... ");
-        let client = RailwayClient::new(token, cache.clone());
+        let client = RailwayClient::new(token, cache.clone())?;
         match client.discover().await {
             Ok(resources) => {
                 let active: Vec<_> = resources
@@ -157,7 +157,7 @@ async fn sync_command(
     // ── Vercel ──
     if let Some(token) = resolver.resolve(&PlatformKind::Vercel) {
         print!("  Vercel: scanning... ");
-        let client = VercelClient::new(token, cache.clone());
+        let client = VercelClient::new(token, cache.clone())?;
         match client.discover_with_links().await {
             Ok(resources) => {
                 let active: Vec<_> = resources
@@ -873,15 +873,18 @@ async fn verify_command(config_path: Option<&Path>) -> Result<()> {
     let health_reports = check_all_platforms_health(&config, &resolver, &cache).await;
 
     // Resolve tokens and validate platform-level auth once.
-    let gh_client = resolver
-        .resolve(&PlatformKind::GitHub)
-        .map(|t| GitHubClient::new(t, cache.clone()));
-    let rw_client = resolver
-        .resolve(&PlatformKind::Railway)
-        .map(|t| RailwayClient::new(t, cache.clone()));
-    let vc_client = resolver
-        .resolve(&PlatformKind::Vercel)
-        .map(|t| VercelClient::new(t, cache.clone()));
+    let gh_client = match resolver.resolve(&PlatformKind::GitHub) {
+        Some(token) => Some(GitHubClient::new(token, cache.clone())?),
+        None => None,
+    };
+    let rw_client = match resolver.resolve(&PlatformKind::Railway) {
+        Some(token) => Some(RailwayClient::new(token, cache.clone())?),
+        None => None,
+    };
+    let vc_client = match resolver.resolve(&PlatformKind::Vercel) {
+        Some(token) => Some(VercelClient::new(token, cache.clone())?),
+        None => None,
+    };
 
     // Fetch GitHub login once.
     let gh_login = if let Some(ref gh) = gh_client {

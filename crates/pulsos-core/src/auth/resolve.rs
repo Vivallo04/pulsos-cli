@@ -154,6 +154,36 @@ mod tests {
     use crate::auth::credential_store::InMemoryStore;
     use secrecy::ExposeSecret;
 
+    struct EnvGuard {
+        vars: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn clear(names: &[&'static str]) -> Self {
+            let mut vars = Vec::with_capacity(names.len());
+            for &name in names {
+                let prev = std::env::var(name).ok();
+                if prev.is_some() {
+                    std::env::remove_var(name);
+                }
+                vars.push((name.to_string(), prev));
+            }
+            Self { vars }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in self.vars.drain(..) {
+                if let Some(val) = value {
+                    std::env::set_var(name, val);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
     fn test_resolver_with_store(store: Arc<InMemoryStore>) -> TokenResolver {
         TokenResolver::new(store, TokenDetectionConfig::default())
     }
@@ -180,6 +210,7 @@ mod tests {
 
     #[test]
     fn resolve_from_keyring() {
+        let _guard = EnvGuard::clear(PlatformKind::GitHub.env_var_names());
         let store = Arc::new(InMemoryStore::new());
         store.set(&PlatformKind::GitHub, "keyring_token").unwrap();
 

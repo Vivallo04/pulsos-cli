@@ -243,10 +243,10 @@ impl CredentialStore for FallbackStore {
         // when the keyring is unavailable — avoids an unnecessary cleartext copy
         // on systems where the keyring works correctly.
         let keyring_result = self.keyring.set(platform, token);
-        let set_result = if keyring_result.is_err() {
+        let set_result = if let Err(ref err) = keyring_result {
             tracing::info!(
                 platform = platform.display_name(),
-                error = %keyring_result.as_ref().unwrap_err(),
+                error = %err,
                 "OS keyring unavailable, falling back to credentials file"
             );
             let file_result = self.file.set(platform, token);

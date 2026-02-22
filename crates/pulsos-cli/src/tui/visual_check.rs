@@ -34,31 +34,33 @@ mod tests {
     fn highlight_symbol_on_unified_table() {
         let backend = TestBackend::new(140, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.correlated = vec![CorrelatedEvent {
-            project_name: Some("my-saas".into()),
-            commit_sha: Some("abc123def".into()),
-            github: Some(DeploymentEvent {
-                id: "r1".into(),
-                platform: Platform::GitHub,
-                status: DeploymentStatus::Success,
+        let data = DataSnapshot {
+            correlated: vec![CorrelatedEvent {
+                project_name: Some("my-saas".into()),
                 commit_sha: Some("abc123def".into()),
-                branch: Some("main".into()),
-                title: Some("CI".into()),
-                actor: Some("dev".into()),
-                created_at: Utc::now(),
-                updated_at: None,
-                duration_secs: Some(42),
-                url: None,
-                metadata: EventMetadata::default(),
-                is_from_cache: false,
-            }),
-            railway: None,
-            vercel: None,
-            confidence: Confidence::High,
-            timestamp: Utc::now(),
-            is_stale: false,
-        }];
+                github: Some(DeploymentEvent {
+                    id: "r1".into(),
+                    platform: Platform::GitHub,
+                    status: DeploymentStatus::Success,
+                    commit_sha: Some("abc123def".into()),
+                    branch: Some("main".into()),
+                    title: Some("CI".into()),
+                    actor: Some("dev".into()),
+                    created_at: Utc::now(),
+                    updated_at: None,
+                    duration_secs: Some(42),
+                    url: None,
+                    metadata: EventMetadata::default(),
+                    is_from_cache: false,
+                }),
+                railway: None,
+                vercel: None,
+                confidence: Confidence::High,
+                timestamp: Utc::now(),
+                is_stale: false,
+            }],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
         terminal
@@ -75,22 +77,24 @@ mod tests {
     fn highlight_symbol_on_platform_table() {
         let backend = TestBackend::new(140, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.events = vec![DeploymentEvent {
-            id: "r1".into(),
-            platform: Platform::GitHub,
-            status: DeploymentStatus::Success,
-            commit_sha: Some("abc".into()),
-            branch: Some("main".into()),
-            title: Some("CI".into()),
-            actor: Some("dev".into()),
-            created_at: Utc::now(),
-            updated_at: None,
-            duration_secs: None,
-            url: None,
-            metadata: EventMetadata::default(),
-            is_from_cache: false,
-        }];
+        let data = DataSnapshot {
+            events: vec![DeploymentEvent {
+                id: "r1".into(),
+                platform: Platform::GitHub,
+                status: DeploymentStatus::Success,
+                commit_sha: Some("abc".into()),
+                branch: Some("main".into()),
+                title: Some("CI".into()),
+                actor: Some("dev".into()),
+                created_at: Utc::now(),
+                updated_at: None,
+                duration_secs: None,
+                url: None,
+                metadata: EventMetadata::default(),
+                is_from_cache: false,
+            }],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
         terminal
@@ -133,22 +137,24 @@ mod tests {
     fn search_bar_inline_on_platform_tab() {
         let backend = TestBackend::new(100, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.events = vec![DeploymentEvent {
-            id: "r1".into(),
-            platform: Platform::GitHub,
-            status: DeploymentStatus::Success,
-            commit_sha: Some("abc".into()),
-            branch: Some("main".into()),
-            title: Some("production deploy".into()),
-            actor: Some("dev".into()),
-            created_at: Utc::now(),
-            updated_at: None,
-            duration_secs: None,
-            url: None,
-            metadata: EventMetadata::default(),
-            is_from_cache: false,
-        }];
+        let data = DataSnapshot {
+            events: vec![DeploymentEvent {
+                id: "r1".into(),
+                platform: Platform::GitHub,
+                status: DeploymentStatus::Success,
+                commit_sha: Some("abc".into()),
+                branch: Some("main".into()),
+                title: Some("production deploy".into()),
+                actor: Some("dev".into()),
+                created_at: Utc::now(),
+                updated_at: None,
+                duration_secs: None,
+                url: None,
+                metadata: EventMetadata::default(),
+                is_from_cache: false,
+            }],
+            ..Default::default()
+        };
         let mut app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         app.input_mode = InputMode::Search;
         app.search_query = "prod".into();
@@ -188,14 +194,16 @@ mod tests {
     fn health_list_two_row_items_with_status_labels() {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.health_scores = vec![
-            ("my-saas".into(), 95),
-            ("api-server".into(), 75),
-            ("frontend".into(), 50),
-        ];
-        data.health_breakdowns = vec![];
-        data.health_history = vec![];
+        let data = DataSnapshot {
+            health_scores: vec![
+                ("my-saas".into(), 95),
+                ("api-server".into(), 75),
+                ("frontend".into(), 50),
+            ],
+            health_breakdowns: vec![],
+            health_history: vec![],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
         terminal
@@ -222,45 +230,47 @@ mod tests {
     fn health_detail_shows_recent_events() {
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.health_scores = vec![("my-saas".into(), 95)];
-        data.health_breakdowns = vec![(
-            "my-saas".into(),
-            HealthBreakdown {
-                total: 95,
-                github_score: Some(90),
-                railway_score: Some(100),
-                vercel_score: None,
-                github_weight: 50,
-                railway_weight: 50,
-                vercel_weight: 0,
-            },
-        )];
-        data.health_history = vec![("my-saas".into(), vec![80, 85, 90, 95])];
-        data.correlated = vec![CorrelatedEvent {
-            project_name: Some("my-saas".into()),
-            commit_sha: Some("abc123".into()),
-            github: Some(DeploymentEvent {
-                id: "r1".into(),
-                platform: Platform::GitHub,
-                status: DeploymentStatus::Success,
+        let data = DataSnapshot {
+            health_scores: vec![("my-saas".into(), 95)],
+            health_breakdowns: vec![(
+                "my-saas".into(),
+                HealthBreakdown {
+                    total: 95,
+                    github_score: Some(90),
+                    railway_score: Some(100),
+                    vercel_score: None,
+                    github_weight: 50,
+                    railway_weight: 50,
+                    vercel_weight: 0,
+                },
+            )],
+            health_history: vec![("my-saas".into(), vec![80, 85, 90, 95])],
+            correlated: vec![CorrelatedEvent {
+                project_name: Some("my-saas".into()),
                 commit_sha: Some("abc123".into()),
-                branch: Some("main".into()),
-                title: Some("Deploy v2.0".into()),
-                actor: Some("dev".into()),
-                created_at: Utc::now(),
-                updated_at: None,
-                duration_secs: None,
-                url: None,
-                metadata: EventMetadata::default(),
-                is_from_cache: false,
-            }),
-            railway: None,
-            vercel: None,
-            confidence: Confidence::High,
-            timestamp: Utc::now(),
-            is_stale: false,
-        }];
+                github: Some(DeploymentEvent {
+                    id: "r1".into(),
+                    platform: Platform::GitHub,
+                    status: DeploymentStatus::Success,
+                    commit_sha: Some("abc123".into()),
+                    branch: Some("main".into()),
+                    title: Some("Deploy v2.0".into()),
+                    actor: Some("dev".into()),
+                    created_at: Utc::now(),
+                    updated_at: None,
+                    duration_secs: None,
+                    url: None,
+                    metadata: EventMetadata::default(),
+                    is_from_cache: false,
+                }),
+                railway: None,
+                vercel: None,
+                confidence: Confidence::High,
+                timestamp: Utc::now(),
+                is_stale: false,
+            }],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
         terminal
@@ -281,10 +291,12 @@ mod tests {
     fn health_detail_shows_no_events_when_empty() {
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.health_scores = vec![("my-saas".into(), 95)];
-        data.health_breakdowns = vec![];
-        data.health_history = vec![];
+        let data = DataSnapshot {
+            health_scores: vec![("my-saas".into(), 95)],
+            health_breakdowns: vec![],
+            health_history: vec![],
+            ..Default::default()
+        };
         // No correlated events
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
@@ -338,40 +350,42 @@ mod tests {
     fn platform_tab_shows_pipeline_stages() {
         let backend = TestBackend::new(160, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.events = vec![DeploymentEvent {
-            id: "run-1".into(),
-            platform: Platform::GitHub,
-            status: DeploymentStatus::Failed,
-            commit_sha: Some("abc123".into()),
-            branch: Some("main".into()),
-            title: Some("CI".into()),
-            actor: Some("dev".into()),
-            created_at: Utc::now(),
-            updated_at: None,
-            duration_secs: Some(120),
-            url: None,
-            metadata: EventMetadata {
-                workflow_name: Some("CI".into()),
-                trigger_event: Some("push".into()),
-                jobs: vec![
-                    JobSummary {
-                        name: "Build".into(),
-                        status: DeploymentStatus::Success,
-                    },
-                    JobSummary {
-                        name: "Test".into(),
-                        status: DeploymentStatus::Success,
-                    },
-                    JobSummary {
-                        name: "Deploy".into(),
-                        status: DeploymentStatus::Failed,
-                    },
-                ],
-                ..Default::default()
-            },
-            is_from_cache: false,
-        }];
+        let data = DataSnapshot {
+            events: vec![DeploymentEvent {
+                id: "run-1".into(),
+                platform: Platform::GitHub,
+                status: DeploymentStatus::Failed,
+                commit_sha: Some("abc123".into()),
+                branch: Some("main".into()),
+                title: Some("CI".into()),
+                actor: Some("dev".into()),
+                created_at: Utc::now(),
+                updated_at: None,
+                duration_secs: Some(120),
+                url: None,
+                metadata: EventMetadata {
+                    workflow_name: Some("CI".into()),
+                    trigger_event: Some("push".into()),
+                    jobs: vec![
+                        JobSummary {
+                            name: "Build".into(),
+                            status: DeploymentStatus::Success,
+                        },
+                        JobSummary {
+                            name: "Test".into(),
+                            status: DeploymentStatus::Success,
+                        },
+                        JobSummary {
+                            name: "Deploy".into(),
+                            status: DeploymentStatus::Failed,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                is_from_cache: false,
+            }],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
         terminal
@@ -394,26 +408,28 @@ mod tests {
     fn platform_tab_falls_back_to_workflow_detail_without_jobs() {
         let backend = TestBackend::new(160, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut data = DataSnapshot::default();
-        data.events = vec![DeploymentEvent {
-            id: "run-1".into(),
-            platform: Platform::GitHub,
-            status: DeploymentStatus::Success,
-            commit_sha: Some("abc123".into()),
-            branch: Some("main".into()),
-            title: Some("CI".into()),
-            actor: Some("dev".into()),
-            created_at: Utc::now(),
-            updated_at: None,
-            duration_secs: Some(42),
-            url: None,
-            metadata: EventMetadata {
-                workflow_name: Some("CI".into()),
-                trigger_event: Some("push".into()),
-                ..Default::default()
-            },
-            is_from_cache: false,
-        }];
+        let data = DataSnapshot {
+            events: vec![DeploymentEvent {
+                id: "run-1".into(),
+                platform: Platform::GitHub,
+                status: DeploymentStatus::Success,
+                commit_sha: Some("abc123".into()),
+                branch: Some("main".into()),
+                title: Some("CI".into()),
+                actor: Some("dev".into()),
+                created_at: Utc::now(),
+                updated_at: None,
+                duration_secs: Some(42),
+                url: None,
+                metadata: EventMetadata {
+                    workflow_name: Some("CI".into()),
+                    trigger_event: Some("push".into()),
+                    ..Default::default()
+                },
+                is_from_cache: false,
+            }],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
         terminal

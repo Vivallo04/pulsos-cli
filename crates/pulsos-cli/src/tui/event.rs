@@ -12,5 +12,5 @@ pub enum AppEvent {
     /// Terminal was resized.
     Resize(u16, u16),
     /// Asynchronous Settings/Auth action result.
-    ActionResult(ActionResult),
+    ActionResult(Box<ActionResult>),
 }

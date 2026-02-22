@@ -84,6 +84,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -93,6 +96,35 @@ jobs:
       - name: Merge checksums
         run: cat artifacts/*.sha256 > artifacts/SHA256SUMS.txt
 
+      - name: Render Homebrew formula
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TEMPLATE="release/homebrew/pulsos.rb"
+          OUT="artifacts/pulsos.rb"
+
+          SHA_AARCH64_APPLE_DARWIN="$(grep "pulsos-aarch64-apple-darwin.tar.gz" artifacts/SHA256SUMS.txt | awk '{print $1}')"
+          SHA_X86_64_APPLE_DARWIN="$(grep "pulsos-x86_64-apple-darwin.tar.gz" artifacts/SHA256SUMS.txt | awk '{print $1}')"
+          SHA_AARCH64_UNKNOWN_LINUX_GNU="$(grep "pulsos-aarch64-unknown-linux-gnu.tar.gz" artifacts/SHA256SUMS.txt | awk '{print $1}')"
+          SHA_X86_64_UNKNOWN_LINUX_GNU="$(grep "pulsos-x86_64-unknown-linux-gnu.tar.gz" artifacts/SHA256SUMS.txt | awk '{print $1}')"
+
+          if [ -z "$SHA_AARCH64_APPLE_DARWIN" ] || [ -z "$SHA_X86_64_APPLE_DARWIN" ] || [ -z "$SHA_AARCH64_UNKNOWN_LINUX_GNU" ] || [ -z "$SHA_X86_64_UNKNOWN_LINUX_GNU" ]; then
+            echo "Missing checksum(s) for Homebrew formula"
+            exit 1
+          fi
+
+          sed \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{SHA256_AARCH64_APPLE_DARWIN}}/${SHA_AARCH64_APPLE_DARWIN}/g" \
+            -e "s/{{SHA256_X86_64_APPLE_DARWIN}}/${SHA_X86_64_APPLE_DARWIN}/g" \
+            -e "s/{{SHA256_AARCH64_UNKNOWN_LINUX_GNU}}/${SHA_AARCH64_UNKNOWN_LINUX_GNU}/g" \
+            -e "s/{{SHA256_X86_64_UNKNOWN_LINUX_GNU}}/${SHA_X86_64_UNKNOWN_LINUX_GNU}/g" \
+            "$TEMPLATE" > "$OUT"
+
+          if grep -n "{{" "$OUT"; then
+            echo "Unsubstituted placeholders remain in Homebrew formula"
+            exit 1
+          fi
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
@@ -101,10 +133,11 @@ jobs:
             artifacts/pulsos-*.tar.gz
             artifacts/pulsos-*.zip
             artifacts/SHA256SUMS.txt
+            artifacts/pulsos.rb
 
   publish-crate:
     name: Publish to crates.io
-    needs: build
+    needs: [build, release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

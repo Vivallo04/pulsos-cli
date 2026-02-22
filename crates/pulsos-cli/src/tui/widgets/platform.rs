@@ -284,8 +284,10 @@ mod tests {
         let backend = TestBackend::new(140, 20);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let mut data = DataSnapshot::default();
-        data.events = sample_events();
+        let data = DataSnapshot {
+            events: sample_events(),
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
 

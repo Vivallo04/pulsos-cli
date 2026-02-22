@@ -463,7 +463,7 @@ impl App {
                     "ok: saved correlations: {total} total ({added} new, {updated} updated)"
                 ));
                 self.settings_flow = SettingsFlowState::ValidationResult;
-                outcome.replace_config = Some(config);
+                outcome.replace_config = Some(*config);
                 outcome.force_refresh = true;
                 self.onboarding.reset();
             }
@@ -534,18 +534,24 @@ mod tests {
         let app = App::new(data.clone(), config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Unified);
 
-        let mut config = TuiConfig::default();
-        config.default_tab = "platform".into();
+        let config = TuiConfig {
+            default_tab: "platform".into(),
+            ..Default::default()
+        };
         let app = App::new(data.clone(), config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Platform);
 
-        let mut config = TuiConfig::default();
-        config.default_tab = "health".into();
+        let config = TuiConfig {
+            default_tab: "health".into(),
+            ..Default::default()
+        };
         let app = App::new(data.clone(), config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Health);
 
-        let mut config = TuiConfig::default();
-        config.default_tab = "settings".into();
+        let config = TuiConfig {
+            default_tab: "settings".into(),
+            ..Default::default()
+        };
         let app = App::new(data, config, LogRingBuffer::new());
         assert_eq!(app.active_tab, Tab::Settings);
     }

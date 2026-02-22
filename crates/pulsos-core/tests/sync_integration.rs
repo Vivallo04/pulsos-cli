@@ -260,7 +260,8 @@ async fn railway_discover_returns_services() {
         SecretString::new("test-railway-token".into()),
         format!("{}/graphql/v2", mock.url()),
         cache,
-    );
+    )
+    .unwrap();
 
     let resources = client.discover().await.unwrap();
     assert!(!resources.is_empty(), "Should discover Railway services");
@@ -289,7 +290,8 @@ async fn vercel_discover_with_links_returns_linked_repo() {
         SecretString::new("test-vercel-token".into()),
         mock.url(),
         cache,
-    );
+    )
+    .unwrap();
 
     let results = client.discover_with_links().await.unwrap();
     assert_eq!(results.len(), 1);
@@ -315,17 +317,20 @@ async fn full_discovery_and_correlation_with_mock_servers() {
         SecretString::new("test-github-token".into()),
         github_mock.url(),
         cache.clone(),
-    );
+    )
+    .unwrap();
     let railway_client = RailwayClient::new_with_base_url(
         SecretString::new("test-railway-token".into()),
         format!("{}/graphql/v2", railway_mock.url()),
         cache.clone(),
-    );
+    )
+    .unwrap();
     let vercel_client = VercelClient::new_with_base_url(
         SecretString::new("test-vercel-token".into()),
         vercel_mock.url(),
         cache.clone(),
-    );
+    )
+    .unwrap();
 
     let github_resources = github_client.discover().await.unwrap();
     let railway_resources = railway_client.discover().await.unwrap();

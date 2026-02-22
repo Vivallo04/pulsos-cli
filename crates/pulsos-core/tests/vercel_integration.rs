@@ -15,7 +15,8 @@ async fn fetch_events_returns_deployments() {
         SecretString::new("test-vercel-token".into()),
         mock.url(),
         cache,
-    );
+    )
+    .unwrap();
 
     let tracked = vec![TrackedResource {
         platform_id: "my-saas-web".into(),
@@ -51,7 +52,8 @@ async fn validate_auth_succeeds() {
         SecretString::new("test-vercel-token".into()),
         mock.url(),
         cache,
-    );
+    )
+    .unwrap();
 
     let status = client.validate_auth().await.unwrap();
     assert!(status.valid);
@@ -67,7 +69,8 @@ async fn discover_returns_projects() {
         SecretString::new("test-vercel-token".into()),
         mock.url(),
         cache,
-    );
+    )
+    .unwrap();
 
     let resources = client.discover().await.unwrap();
     assert_eq!(resources.len(), 1);

@@ -354,43 +354,49 @@ mod tests {
     }
 
     fn test_app() -> App {
-        let mut data = DataSnapshot::default();
         // Simulate some rows so navigation works
-        data.health_scores = vec![
-            ("proj-a".into(), 90),
-            ("proj-b".into(), 50),
-            ("proj-c".into(), 10),
-        ];
+        let data = DataSnapshot {
+            health_scores: vec![
+                ("proj-a".into(), 90),
+                ("proj-b".into(), 50),
+                ("proj-c".into(), 10),
+            ],
+            ..Default::default()
+        };
         App::new(data, TuiConfig::default(), LogRingBuffer::new())
     }
 
     fn settings_app() -> App {
-        let mut data = DataSnapshot::default();
-        data.platform_health = vec![PlatformHealthReport {
-            platform: PlatformKind::GitHub,
-            state: PlatformHealthState::NoToken,
-            reason: "no token".into(),
-            next_action: "set token".into(),
-            token_source: None,
-            last_checked_at: Utc::now(),
-            details: PlatformHealthDetails::None,
-        }];
+        let data = DataSnapshot {
+            platform_health: vec![PlatformHealthReport {
+                platform: PlatformKind::GitHub,
+                state: PlatformHealthState::NoToken,
+                reason: "no token".into(),
+                next_action: "set token".into(),
+                token_source: None,
+                last_checked_at: Utc::now(),
+                details: PlatformHealthDetails::None,
+            }],
+            ..Default::default()
+        };
         let mut app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         app.active_tab = Tab::Settings;
         app
     }
 
     fn env_settings_app() -> App {
-        let mut data = DataSnapshot::default();
-        data.platform_health = vec![PlatformHealthReport {
-            platform: PlatformKind::GitHub,
-            state: PlatformHealthState::Ready,
-            reason: "env token".into(),
-            next_action: "none".into(),
-            token_source: Some("GITHUB_TOKEN".into()),
-            last_checked_at: Utc::now(),
-            details: PlatformHealthDetails::None,
-        }];
+        let data = DataSnapshot {
+            platform_health: vec![PlatformHealthReport {
+                platform: PlatformKind::GitHub,
+                state: PlatformHealthState::Ready,
+                reason: "env token".into(),
+                next_action: "none".into(),
+                token_source: Some("GITHUB_TOKEN".into()),
+                last_checked_at: Utc::now(),
+                details: PlatformHealthDetails::None,
+            }],
+            ..Default::default()
+        };
         let mut app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         app.active_tab = Tab::Settings;
         app

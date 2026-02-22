@@ -40,7 +40,7 @@ async fn resolve_token_from_keyring_and_validate_github() {
     assert_eq!(source, TokenSource::Keyring);
 
     // Validate via mock API
-    let client = GitHubClient::new_with_base_url(token, mock.url(), cache.clone());
+    let client = GitHubClient::new_with_base_url(token, mock.url(), cache.clone()).unwrap();
     let status = client.validate_auth().await.unwrap();
     assert!(status.valid);
     assert_eq!(status.identity, "@vivallo");
@@ -58,7 +58,8 @@ async fn validate_github_token_with_scopes() {
         SecretString::new("test-github-token".into()),
         mock.url(),
         cache.clone(),
-    );
+    )
+    .unwrap();
     let status = client.validate_auth().await.unwrap();
 
     assert!(status.valid);

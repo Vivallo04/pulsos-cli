@@ -357,8 +357,10 @@ mod tests {
         let backend = TestBackend::new(120, 20);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        let mut data = DataSnapshot::default();
-        data.platform_health = vec![health_report(Some("keyring"))];
+        let data = DataSnapshot {
+            platform_health: vec![health_report(Some("keyring"))],
+            ..Default::default()
+        };
 
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
         let theme = Theme::dark();
@@ -382,8 +384,10 @@ mod tests {
     #[test]
     fn detail_copy_uses_normalized_sections_and_actions() {
         let report = health_report(Some("keyring"));
-        let mut data = DataSnapshot::default();
-        data.platform_health = vec![report.clone()];
+        let data = DataSnapshot {
+            platform_health: vec![report.clone()],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
 
         let detail = render_detail(&report, &app);
@@ -406,8 +410,10 @@ mod tests {
     #[test]
     fn detail_shows_env_override_warning_when_env_token_is_active() {
         let report = health_report(Some("GITHUB_TOKEN"));
-        let mut data = DataSnapshot::default();
-        data.platform_health = vec![report.clone()];
+        let data = DataSnapshot {
+            platform_health: vec![report.clone()],
+            ..Default::default()
+        };
         let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
 
         let detail = render_detail(&report, &app);

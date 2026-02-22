@@ -15,7 +15,7 @@ async fn fetch_events_returns_runs() {
     let mock = MockGitHub::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache);
+    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache).unwrap();
 
     let tracked = vec![TrackedResource {
         platform_id: "myorg/my-saas".into(),
@@ -48,7 +48,7 @@ async fn validate_auth_succeeds() {
     let mock = MockGitHub::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache);
+    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache).unwrap();
 
     let status = client.validate_auth().await.unwrap();
     assert!(status.valid);
@@ -61,7 +61,7 @@ async fn discover_returns_repos() {
     let mock = MockGitHub::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache);
+    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache).unwrap();
 
     let resources = client.discover().await.unwrap();
     assert_eq!(resources.len(), 2);
@@ -75,12 +75,12 @@ async fn rate_limit_updated_from_headers() {
     let mock = MockGitHub::start().await;
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
-    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache);
+    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache).unwrap();
 
-    // Before any requests, rate limit is default
+    // Before any requests, rate limit is unknown
     let rl = client.rate_limit_status().await.unwrap();
-    assert_eq!(rl.limit, 5000);
-    assert_eq!(rl.remaining, 5000);
+    assert_eq!(rl.limit, 0);
+    assert_eq!(rl.remaining, 0);
 
     // After a request, rate limit should be updated from headers
     let _ = client.validate_auth().await.unwrap();

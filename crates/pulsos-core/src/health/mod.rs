@@ -206,7 +206,21 @@ async fn check_github(
     now: DateTime<Utc>,
     token_source: Option<String>,
 ) -> PlatformHealthReport {
-    let client = GitHubClient::new(token, cache.clone());
+    let client = match GitHubClient::new(token, cache.clone()) {
+        Ok(client) => client,
+        Err(err) => {
+            let state = classify_error(&err);
+            return PlatformHealthReport {
+                platform: PlatformKind::GitHub,
+                state,
+                reason: err.user_message(),
+                next_action: error_to_action(PlatformKind::GitHub, state),
+                token_source,
+                last_checked_at: now,
+                details: PlatformHealthDetails::GitHub(GitHubHealthDetails::default()),
+            };
+        }
+    };
 
     let auth = match client.validate_auth().await {
         Ok(status) => status,
@@ -374,7 +388,21 @@ async fn check_railway(
     now: DateTime<Utc>,
     token_source: Option<String>,
 ) -> PlatformHealthReport {
-    let client = RailwayClient::new(token, cache.clone());
+    let client = match RailwayClient::new(token, cache.clone()) {
+        Ok(client) => client,
+        Err(err) => {
+            let state = classify_error(&err);
+            return PlatformHealthReport {
+                platform: PlatformKind::Railway,
+                state,
+                reason: err.user_message(),
+                next_action: error_to_action(PlatformKind::Railway, state),
+                token_source,
+                last_checked_at: now,
+                details: PlatformHealthDetails::Railway(RailwayHealthDetails::default()),
+            };
+        }
+    };
 
     let auth = match client.validate_auth().await {
         Ok(status) => status,
@@ -511,7 +539,21 @@ async fn check_vercel(
     now: DateTime<Utc>,
     token_source: Option<String>,
 ) -> PlatformHealthReport {
-    let client = VercelClient::new(token, cache.clone());
+    let client = match VercelClient::new(token, cache.clone()) {
+        Ok(client) => client,
+        Err(err) => {
+            let state = classify_error(&err);
+            return PlatformHealthReport {
+                platform: PlatformKind::Vercel,
+                state,
+                reason: err.user_message(),
+                next_action: error_to_action(PlatformKind::Vercel, state),
+                token_source,
+                last_checked_at: now,
+                details: PlatformHealthDetails::Vercel(VercelHealthDetails::default()),
+            };
+        }
+    };
 
     let auth = match client.validate_auth().await {
         Ok(status) => status,

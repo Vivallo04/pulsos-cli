@@ -45,7 +45,7 @@ use super::app::DataSnapshot;
 #[derive(Debug, Clone)]
 pub enum PollerCommand {
     ForceRefresh,
-    ReplaceConfig(PulsosConfig),
+    ReplaceConfig(Box<PulsosConfig>),
 }
 
 /// Maximum number of health history entries per project (for sparklines).
@@ -93,7 +93,7 @@ async fn wait_for_next_cycle(
             match msg {
                 Some(PollerCommand::ForceRefresh) => Some(true),
                 Some(PollerCommand::ReplaceConfig(new_config)) => {
-                    *config = new_config;
+                    *config = *new_config;
                     *resources = PlatformResources::from_correlations(&config.correlations);
                     Some(true)
                 }
@@ -224,7 +224,7 @@ pub async fn run_poller(
             match command {
                 PollerCommand::ForceRefresh => force_refresh = true,
                 PollerCommand::ReplaceConfig(new_config) => {
-                    config = new_config;
+                    config = *new_config;
                     resources = PlatformResources::from_correlations(&config.correlations);
                     force_refresh = true;
                 }
@@ -281,46 +281,50 @@ pub async fn run_poller(
             && (force_refresh || now.duration_since(last_github) >= github_throttle)
         {
             if let Some(token) = resolver.resolve(&PlatformKind::GitHub) {
-                let client = GitHubClient::new(token, cache.clone());
-                let mut github_events: Vec<DeploymentEvent> = Vec::new();
-                let mut github_failed = false;
+                match GitHubClient::new(token, cache.clone()) {
+                    Ok(client) => {
+                        let mut github_events: Vec<DeploymentEvent> = Vec::new();
+                        let mut github_failed = false;
 
-                // Staggered fetch: process repos in batches to avoid burst rate-limit hits.
-                let results = stagger(
-                    &resources.github,
-                    BATCH_SIZE,
-                    BATCH_DELAY_SECS,
-                    |resource| {
-                        let client = &client;
-                        async move { client.fetch_events(std::slice::from_ref(resource)).await }
-                    },
-                )
-                .await;
+                        // Staggered fetch: process repos in batches to avoid burst rate-limit hits.
+                        let results = stagger(
+                            &resources.github,
+                            BATCH_SIZE,
+                            BATCH_DELAY_SECS,
+                            |resource| {
+                                let client = &client;
+                                async move { client.fetch_events(std::slice::from_ref(resource)).await }
+                            },
+                        )
+                        .await;
 
-                for result in results {
-                    match result {
-                        Ok(evts) => github_events.extend(evts),
-                        Err(e) => {
-                            github_failed = true;
-                            warnings.push(format!("GitHub: {}", e.user_message()));
+                        for result in results {
+                            match result {
+                                Ok(evts) => github_events.extend(evts),
+                                Err(e) => {
+                                    github_failed = true;
+                                    warnings.push(format!("GitHub: {}", e.user_message()));
+                                }
+                            }
+                        }
+                        if !github_failed {
+                            last_github_events = github_events;
+                            last_github = now;
+                        }
+
+                        // Update adaptive poll interval based on current rate-limit budget.
+                        if let Ok(rl_info) = client.rate_limit_status().await {
+                            let budget = RateLimitBudget::from_rate_limit_info(&rl_info);
+                            github_throttle = Duration::from_secs(budget.recommended_interval());
+                            if budget.is_exhausted() {
+                                warnings.push(format!(
+                                    "GitHub rate limit exhausted. Showing cached data. Resets in {}s.",
+                                    budget.secs_until_reset()
+                                ));
+                            }
                         }
                     }
-                }
-                if !github_failed {
-                    last_github_events = github_events;
-                    last_github = now;
-                }
-
-                // Update adaptive poll interval based on current rate-limit budget.
-                if let Ok(rl_info) = client.rate_limit_status().await {
-                    let budget = RateLimitBudget::from_rate_limit_info(&rl_info);
-                    github_throttle = Duration::from_secs(budget.recommended_interval());
-                    if budget.is_exhausted() {
-                        warnings.push(format!(
-                            "GitHub rate limit exhausted. Showing cached data. Resets in {}s.",
-                            budget.secs_until_reset()
-                        ));
-                    }
+                    Err(err) => warnings.push(format!("GitHub: {}", err.user_message())),
                 }
             } else {
                 warnings.push("GitHub: no token available".into());
@@ -332,13 +336,15 @@ pub async fn run_poller(
             && (force_refresh || now.duration_since(last_railway) >= RAILWAY_THROTTLE)
         {
             if let Some(token) = resolver.resolve(&PlatformKind::Railway) {
-                let client = RailwayClient::new(token, cache.clone());
-                match client.fetch_events(&resources.railway).await {
-                    Ok(events) => {
-                        last_railway_events = events;
-                        last_railway = now;
-                    }
-                    Err(e) => warnings.push(format!("Railway: {}", e.user_message())),
+                match RailwayClient::new(token, cache.clone()) {
+                    Ok(client) => match client.fetch_events(&resources.railway).await {
+                        Ok(events) => {
+                            last_railway_events = events;
+                            last_railway = now;
+                        }
+                        Err(e) => warnings.push(format!("Railway: {}", e.user_message())),
+                    },
+                    Err(err) => warnings.push(format!("Railway: {}", err.user_message())),
                 }
             } else {
                 warnings.push("Railway: no token available".into());
@@ -350,13 +356,15 @@ pub async fn run_poller(
             && (force_refresh || now.duration_since(last_vercel) >= VERCEL_THROTTLE)
         {
             if let Some(token) = resolver.resolve(&PlatformKind::Vercel) {
-                let client = VercelClient::new(token, cache.clone());
-                match client.fetch_events(&resources.vercel).await {
-                    Ok(events) => {
-                        last_vercel_events = events;
-                        last_vercel = now;
-                    }
-                    Err(e) => warnings.push(format!("Vercel: {}", e.user_message())),
+                match VercelClient::new(token, cache.clone()) {
+                    Ok(client) => match client.fetch_events(&resources.vercel).await {
+                        Ok(events) => {
+                            last_vercel_events = events;
+                            last_vercel = now;
+                        }
+                        Err(e) => warnings.push(format!("Vercel: {}", e.user_message())),
+                    },
+                    Err(err) => warnings.push(format!("Vercel: {}", err.user_message())),
                 }
             } else {
                 warnings.push("Vercel: no token available".into());
@@ -373,15 +381,19 @@ pub async fn run_poller(
             && (force_refresh || now.duration_since(last_metrics_at) >= METRICS_THROTTLE)
         {
             if let Some(token) = resolver.resolve(&PlatformKind::Railway) {
-                let client = RailwayClient::new(token, cache.clone());
-                for resource in &resources.railway {
-                    let metrics = client.fetch_service_metrics(&resource.platform_id).await;
-                    last_telemetry
-                        .entry(resource.display_name.clone())
-                        .or_default()
-                        .current_resources = metrics;
+                match RailwayClient::new(token, cache.clone()) {
+                    Ok(client) => {
+                        for resource in &resources.railway {
+                            let metrics = client.fetch_service_metrics(&resource.platform_id).await;
+                            last_telemetry
+                                .entry(resource.display_name.clone())
+                                .or_default()
+                                .current_resources = metrics;
+                        }
+                        last_metrics_at = now;
+                    }
+                    Err(err) => warnings.push(format!("Railway: {}", err.user_message())),
                 }
-                last_metrics_at = now;
             }
         }
 
@@ -398,9 +410,11 @@ pub async fn run_poller(
                             .source_id
                             .as_deref()
                             .map(|id| {
-                                corr.vercel_project.as_deref() == Some(id)
+                                corr.vercel_project
+                                    .as_deref()
+                                    .map(|vp| id == vp || id.contains(vp))
+                                    .unwrap_or(false)
                                     || corr.railway_project.as_deref() == Some(id)
-                                    || id.contains(corr.vercel_project.as_deref().unwrap_or(""))
                             })
                             .unwrap_or(false)
                     })

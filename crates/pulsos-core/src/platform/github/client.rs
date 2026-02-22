@@ -28,7 +28,7 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
-    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Self {
+    pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Result<Self, PulsosError> {
         Self::new_with_base_url(token, "https://api.github.com".into(), cache)
     }
 
@@ -36,21 +36,21 @@ impl GitHubClient {
         token: SecretString,
         base_url: String,
         cache: Arc<CacheStore>,
-    ) -> Self {
+    ) -> Result<Self, PulsosError> {
         let client = reqwest::Client::builder()
             .user_agent("pulsos/0.1.0")
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .expect("Failed to build HTTP client");
+            .map_err(|e| PulsosError::Other(anyhow::anyhow!("Failed to build GitHub client: {e}")))?;
 
-        Self {
+        Ok(Self {
             client,
             base_url,
             token,
             cache,
             rate_limit: RwLock::new(None),
-        }
+        })
     }
 
     fn auth_headers(&self) -> Result<HeaderMap, PulsosError> {
@@ -643,8 +643,9 @@ impl PlatformAdapter for GitHubClient {
                 },
             }),
             None => Ok(RateLimitInfo {
-                limit: 5000,
-                remaining: 5000,
+                // Unknown until we've observed headers; treat as exhausted to avoid over-polling.
+                limit: 0,
+                remaining: 0,
                 resets_at: Utc::now(),
                 percentage_used: 0.0,
             }),

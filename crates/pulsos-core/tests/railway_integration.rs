@@ -15,7 +15,8 @@ async fn fetch_events_returns_deployments() {
         SecretString::new("test-railway-token".into()),
         format!("{}/graphql/v2", mock.url()),
         cache,
-    );
+    )
+    .unwrap();
 
     let tracked = vec![TrackedResource {
         platform_id: "proj-001:svc-001:env-001".into(),
@@ -46,7 +47,8 @@ async fn validate_auth_succeeds() {
         SecretString::new("test-railway-token".into()),
         format!("{}/graphql/v2", mock.url()),
         cache,
-    );
+    )
+    .unwrap();
 
     let status = client.validate_auth().await.unwrap();
     assert!(status.valid);

@@ -241,7 +241,7 @@ pub async fn execute(
     // GitHub
     if should_fetch("github") && !github_tracked.is_empty() {
         if let Some(token) = resolver.resolve(&PlatformKind::GitHub) {
-            let client = GitHubClient::new(token, cache.clone());
+            let client = GitHubClient::new(token, cache.clone())?;
             match client.fetch_events(&github_tracked).await {
                 Ok(events) => all_events.extend(events),
                 Err(e) => warnings.push(format!("GitHub: {}", e.user_message())),
@@ -255,7 +255,7 @@ pub async fn execute(
     // Railway
     if should_fetch("railway") && !railway_tracked.is_empty() {
         if let Some(token) = resolver.resolve(&PlatformKind::Railway) {
-            let client = RailwayClient::new(token, cache.clone());
+            let client = RailwayClient::new(token, cache.clone())?;
             match client.fetch_events(&railway_tracked).await {
                 Ok(events) => all_events.extend(events),
                 Err(e) => warnings.push(format!("Railway: {}", e.user_message())),
@@ -269,7 +269,7 @@ pub async fn execute(
     // Vercel
     if should_fetch("vercel") && !vercel_tracked.is_empty() {
         if let Some(token) = resolver.resolve(&PlatformKind::Vercel) {
-            let client = VercelClient::new(token, cache.clone());
+            let client = VercelClient::new(token, cache.clone())?;
             match client.fetch_events(&vercel_tracked).await {
                 Ok(events) => all_events.extend(events),
                 Err(e) => warnings.push(format!("Vercel: {}", e.user_message())),
@@ -285,7 +285,7 @@ pub async fn execute(
         all_events.retain(|e| {
             e.branch
                 .as_ref()
-                .is_none_or(|b| b.contains(branch.as_str()))
+                .map_or(true, |b| b.contains(branch.as_str()))
         });
     }
 
