@@ -220,63 +220,54 @@ async fn handle_request(
                 };
 
                 match platform {
-                    PlatformKind::GitHub => {
-                        match GitHubClient::new(token, cache.clone()) {
-                            Ok(client) => match client.discover().await {
-                                Ok(resources) => {
-                                    payload.github = resources
-                                        .into_iter()
-                                        .filter(|r| !r.archived && !r.disabled)
-                                        .collect();
-                                }
-                                Err(err) => payload.warnings.push(format!(
-                                    "GitHub discovery failed: {}",
-                                    err.user_message()
-                                )),
-                            },
+                    PlatformKind::GitHub => match GitHubClient::new(token, cache.clone()) {
+                        Ok(client) => match client.discover().await {
+                            Ok(resources) => {
+                                payload.github = resources
+                                    .into_iter()
+                                    .filter(|r| !r.archived && !r.disabled)
+                                    .collect();
+                            }
                             Err(err) => payload
                                 .warnings
-                                .push(format!("GitHub init failed: {}", err.user_message())),
-                        }
-                    }
-                    PlatformKind::Railway => {
-                        match RailwayClient::new(token, cache.clone()) {
-                            Ok(client) => match client.discover().await {
-                                Ok(resources) => {
-                                    payload.railway = resources
-                                        .into_iter()
-                                        .filter(|r| !r.archived && !r.disabled)
-                                        .collect();
-                                }
-                                Err(err) => payload.warnings.push(format!(
-                                    "Railway discovery failed: {}",
-                                    err.user_message()
-                                )),
-                            },
+                                .push(format!("GitHub discovery failed: {}", err.user_message())),
+                        },
+                        Err(err) => payload
+                            .warnings
+                            .push(format!("GitHub init failed: {}", err.user_message())),
+                    },
+                    PlatformKind::Railway => match RailwayClient::new(token, cache.clone()) {
+                        Ok(client) => match client.discover().await {
+                            Ok(resources) => {
+                                payload.railway = resources
+                                    .into_iter()
+                                    .filter(|r| !r.archived && !r.disabled)
+                                    .collect();
+                            }
                             Err(err) => payload
                                 .warnings
-                                .push(format!("Railway init failed: {}", err.user_message())),
-                        }
-                    }
-                    PlatformKind::Vercel => {
-                        match VercelClient::new(token, cache.clone()) {
-                            Ok(client) => match client.discover_with_links().await {
-                                Ok(resources) => {
-                                    payload.vercel = resources
-                                        .into_iter()
-                                        .filter(|(r, _)| !r.archived && !r.disabled)
-                                        .collect();
-                                }
-                                Err(err) => payload.warnings.push(format!(
-                                    "Vercel discovery failed: {}",
-                                    err.user_message()
-                                )),
-                            },
+                                .push(format!("Railway discovery failed: {}", err.user_message())),
+                        },
+                        Err(err) => payload
+                            .warnings
+                            .push(format!("Railway init failed: {}", err.user_message())),
+                    },
+                    PlatformKind::Vercel => match VercelClient::new(token, cache.clone()) {
+                        Ok(client) => match client.discover_with_links().await {
+                            Ok(resources) => {
+                                payload.vercel = resources
+                                    .into_iter()
+                                    .filter(|(r, _)| !r.archived && !r.disabled)
+                                    .collect();
+                            }
                             Err(err) => payload
                                 .warnings
-                                .push(format!("Vercel init failed: {}", err.user_message())),
-                        }
-                    }
+                                .push(format!("Vercel discovery failed: {}", err.user_message())),
+                        },
+                        Err(err) => payload
+                            .warnings
+                            .push(format!("Vercel init failed: {}", err.user_message())),
+                    },
                 }
             }
 

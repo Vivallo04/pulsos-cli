@@ -35,7 +35,9 @@ impl VercelClient {
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .map_err(|e| PulsosError::Other(anyhow::anyhow!("Failed to build Vercel client: {e}")))?;
+            .map_err(|e| {
+                PulsosError::Other(anyhow::anyhow!("Failed to build Vercel client: {e}"))
+            })?;
 
         Ok(Self {
             client,

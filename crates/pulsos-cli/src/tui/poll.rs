@@ -287,16 +287,19 @@ pub async fn run_poller(
                         let mut github_failed = false;
 
                         // Staggered fetch: process repos in batches to avoid burst rate-limit hits.
-                        let results = stagger(
-                            &resources.github,
-                            BATCH_SIZE,
-                            BATCH_DELAY_SECS,
-                            |resource| {
-                                let client = &client;
-                                async move { client.fetch_events(std::slice::from_ref(resource)).await }
-                            },
-                        )
-                        .await;
+                        let results =
+                            stagger(
+                                &resources.github,
+                                BATCH_SIZE,
+                                BATCH_DELAY_SECS,
+                                |resource| {
+                                    let client = &client;
+                                    async move {
+                                        client.fetch_events(std::slice::from_ref(resource)).await
+                                    }
+                                },
+                            )
+                            .await;
 
                         for result in results {
                             match result {
