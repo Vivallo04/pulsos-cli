@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::types::{
-    DeploymentsResponse, ProjectsResponse, TeamsResponse, VcDeployment, VcUserResponse,
+    DeploymentsResponse, ProjectsResponse, TeamsResponse, VcDeployment, VcTimestamp, VcUserResponse,
 };
 
 pub struct VercelClient {
@@ -21,6 +21,21 @@ pub struct VercelClient {
 }
 
 impl VercelClient {
+    fn parse_timestamp(value: &VcTimestamp) -> Option<DateTime<Utc>> {
+        match value {
+            VcTimestamp::Millis(ms) => DateTime::from_timestamp_millis(*ms as i64),
+            VcTimestamp::Text(s) => {
+                if let Ok(ms) = s.parse::<i64>() {
+                    DateTime::from_timestamp_millis(ms)
+                } else {
+                    chrono::DateTime::parse_from_rfc3339(s)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&Utc))
+                }
+            }
+        }
+    }
+
     pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Result<Self, PulsosError> {
         Self::new_with_base_url(token, "https://api.vercel.com".into(), cache)
     }
@@ -135,9 +150,12 @@ impl VercelClient {
             None => (None, None, None, None),
         };
 
-        // Vercel `created` is Unix timestamp in milliseconds
-        let created_at =
-            DateTime::from_timestamp_millis(deployment.created as i64).unwrap_or_else(Utc::now);
+        // Vercel sends `created` on some endpoints and `createdAt` (number or string) on others.
+        let created_at = deployment
+            .created
+            .as_ref()
+            .and_then(Self::parse_timestamp)
+            .unwrap_or_else(Utc::now);
 
         let ready_at = deployment
             .ready

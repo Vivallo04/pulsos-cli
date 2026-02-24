@@ -1,14 +1,13 @@
 //! Header widget — 2-line brand mark + tab bar + active-tab underline.
 //!
 //! Layout (§4.17, §5.2):
-//!   Line 1: `P U L S O S   Unified │ Platform │ Health    Last sync: Xs ago`
+//!   Line 1: `P U L S O S   Unified │ Platform │ Health`
 //!   Line 2:  underline `════` only under the active tab (accent.primary)
 
-use chrono::Utc;
 use pulsos_core::auth::PlatformKind;
 use pulsos_core::health::PlatformHealthState;
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::Paragraph,
@@ -21,21 +20,15 @@ use crate::tui::theme::Theme;
 /// Draw the 2-row header.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let rows = Layout::vertical([
-        Constraint::Length(1), // line 1: brand + tabs + sync info
+        Constraint::Length(1), // line 1: brand + tabs + platform badges
         Constraint::Length(1), // line 2: active-tab underline
     ])
     .split(area);
 
-    // ── Line 1: brand | tabs | sync ──────────────────────────────────────────
+    // ── Line 1: brand | tabs ─────────────────────────────────────────────────
     let brand_width = 13u16; // "P U L S O S  " = 13 chars
-    let sync_width = 20u16;
-
-    let row1_chunks = Layout::horizontal([
-        Constraint::Length(brand_width),
-        Constraint::Min(0),
-        Constraint::Length(sync_width),
-    ])
-    .split(rows[0]);
+    let row1_chunks =
+        Layout::horizontal([Constraint::Length(brand_width), Constraint::Min(0)]).split(rows[0]);
 
     // Brand mark
     frame.render_widget(
@@ -47,13 +40,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let mut tab_spans = build_tab_spans(app, theme);
     tab_spans.extend(build_platform_badges(app, theme));
     frame.render_widget(Paragraph::new(Line::from(tab_spans)), row1_chunks[1]);
-
-    // Sync info (right-aligned)
-    let sync_text = format_sync_status(app);
-    frame.render_widget(
-        Paragraph::new(Span::styled(sync_text, theme.t8())).alignment(Alignment::Right),
-        row1_chunks[2],
-    );
 
     // ── Line 2: active-tab underline ─────────────────────────────────────────
     let underline = build_underline(app, brand_width);
@@ -149,34 +135,6 @@ fn build_underline(app: &App, brand_prefix: u16) -> String {
     format!("{}{}", " ".repeat(offset), "═".repeat(width))
 }
 
-fn spinner_frame(app: &App) -> &'static str {
-    const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let elapsed_ms = (Utc::now() - app.data.last_cycle_started_at)
-        .num_milliseconds()
-        .max(0);
-    let idx = ((elapsed_ms / 80) as usize) % FRAMES.len();
-    FRAMES[idx]
-}
-
-/// Format sync status for display in the header.
-fn format_sync_status(app: &App) -> String {
-    if app.data.is_syncing {
-        return format!("{} syncing", spinner_frame(app));
-    }
-
-    let diff = Utc::now() - app.data.fetched_at;
-    let secs = diff.num_seconds();
-    if secs < 5 {
-        "last: just now".into()
-    } else if secs < 60 {
-        format!("last: {secs}s ago")
-    } else if secs < 3600 {
-        format!("last: {}m ago", secs / 60)
-    } else {
-        format!("last: {}h ago", secs / 3600)
-    }
-}
-
 /// Render the header to a buffer — used for testing.
 #[cfg(test)]
 pub fn draw_to_buf(area: Rect, app: &App, _theme: &Theme) -> ratatui::buffer::Buffer {
@@ -223,7 +181,6 @@ mod tests {
     use super::*;
     use crate::tui::app::{DataSnapshot, Tab};
     use crate::tui::log_buffer::LogRingBuffer;
-    use chrono::Duration;
     use pulsos_core::config::types::TuiConfig;
 
     fn test_app() -> App {
@@ -285,20 +242,13 @@ mod tests {
     }
 
     #[test]
-    fn sync_status_shows_spinner_when_syncing() {
-        let mut app = test_app();
-        app.data.is_syncing = true;
-        app.data.last_cycle_started_at = Utc::now() - Duration::milliseconds(160);
-        let text = format_sync_status(&app);
-        assert!(text.contains("syncing"));
-    }
-
-    #[test]
-    fn sync_status_shows_last_age_when_idle() {
-        let mut app = test_app();
-        app.data.is_syncing = false;
-        app.data.fetched_at = Utc::now() - Duration::seconds(30);
-        let text = format_sync_status(&app);
-        assert!(text.starts_with("last: "));
+    fn header_does_not_render_sync_status_text() {
+        let app = test_app();
+        let theme = Theme::dark();
+        let area = Rect::new(0, 0, 120, 2);
+        let buf = draw_to_buf(area, &app, &theme);
+        let text = buffer_text(&buf);
+        assert!(!text.contains("syncing"));
+        assert!(!text.contains("last:"));
     }
 }

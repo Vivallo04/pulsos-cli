@@ -28,8 +28,9 @@ pub struct VcDeployment {
     pub name: String,
     /// "my-app-abc123.vercel.app"
     pub url: Option<String>,
-    /// Unix timestamp in milliseconds
-    pub created: u64,
+    /// Creation time as Unix ms (`created`) or RFC3339/string (`createdAt`) depending on endpoint.
+    #[serde(default, alias = "createdAt")]
+    pub created: Option<VcTimestamp>,
     pub state: Option<VcState>,
     pub ready_state: Option<VcState>,
     #[serde(rename = "type")]
@@ -41,6 +42,14 @@ pub struct VcDeployment {
     pub alias_assigned: Option<serde_json::Value>,
     pub building_at: Option<u64>,
     pub ready: Option<u64>,
+}
+
+/// Vercel timestamp fields can be Unix milliseconds or string timestamps.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum VcTimestamp {
+    Millis(u64),
+    Text(String),
 }
 
 /// Vercel deployment meta — this is where git information lives.
@@ -214,6 +223,7 @@ mod tests {
         }"#;
         let deployment: VcDeployment = serde_json::from_str(json).unwrap();
         assert_eq!(deployment.uid, "dpl_abc123");
+        assert_eq!(deployment.created, Some(VcTimestamp::Millis(1708000000000)));
         assert_eq!(deployment.state, Some(VcState::Ready));
         assert_eq!(deployment.target, Some("production".to_string()));
 
@@ -233,6 +243,7 @@ mod tests {
         }"#;
         let deployment: VcDeployment = serde_json::from_str(json).unwrap();
         assert_eq!(deployment.uid, "dpl_xyz789");
+        assert_eq!(deployment.created, Some(VcTimestamp::Millis(1708000000000)));
     }
 
     #[test]
@@ -245,6 +256,44 @@ mod tests {
         }"#;
         let deployment: VcDeployment = serde_json::from_str(json).unwrap();
         assert_eq!(deployment.uid, "");
+    }
+
+    #[test]
+    fn deserialize_deployment_with_created_at_alias() {
+        let json = r#"{
+            "id": "dpl_aliased",
+            "name": "my-app",
+            "createdAt": 1708000000000,
+            "state": "READY"
+        }"#;
+        let deployment: VcDeployment = serde_json::from_str(json).unwrap();
+        assert_eq!(deployment.created, Some(VcTimestamp::Millis(1708000000000)));
+    }
+
+    #[test]
+    fn deserialize_deployment_with_created_at_text() {
+        let json = r#"{
+            "id": "dpl_text",
+            "name": "my-app",
+            "createdAt": "2026-02-20T10:00:00.000Z",
+            "state": "READY"
+        }"#;
+        let deployment: VcDeployment = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            deployment.created,
+            Some(VcTimestamp::Text("2026-02-20T10:00:00.000Z".to_string()))
+        );
+    }
+
+    #[test]
+    fn deserialize_deployment_missing_created_is_ok() {
+        let json = r#"{
+            "id": "dpl_no_created",
+            "name": "my-app",
+            "state": "READY"
+        }"#;
+        let deployment: VcDeployment = serde_json::from_str(json).unwrap();
+        assert_eq!(deployment.created, None);
     }
 
     #[test]

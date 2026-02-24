@@ -3,6 +3,7 @@
 
 use tokio::sync::{broadcast, mpsc, watch};
 
+use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::types::PulsosConfig;
 
 use crate::daemon::server::DaemonStateEvent;
@@ -13,8 +14,15 @@ pub async fn run_engine(config: PulsosConfig, broadcast_tx: broadcast::Sender<Da
     let (watch_tx, mut watch_rx) = watch::channel(DataSnapshot::default());
     // Daemon doesn't issue poller commands — use a dummy channel that's never sent to.
     let (_cmd_tx, cmd_rx): (mpsc::Sender<PollerCommand>, _) = mpsc::channel(8);
+    let cache = match CacheStore::open_or_temporary() {
+        Ok(cache) => std::sync::Arc::new(cache),
+        Err(err) => {
+            tracing::error!("Cache unavailable, daemon engine cannot start: {err}");
+            return;
+        }
+    };
 
-    tokio::spawn(run_poller(config, watch_tx, cmd_rx));
+    tokio::spawn(run_poller(config, watch_tx, cmd_rx, cache));
 
     let mut seq: u64 = 0;
     loop {

@@ -106,6 +106,32 @@ pub struct JobSummary {
     pub status: DeploymentStatus,
 }
 
+/// Summary of a single GitHub Actions step inside a workflow job.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JobStepSummary {
+    pub number: u32,
+    pub name: String,
+    pub status: DeploymentStatus,
+    pub duration_secs: Option<u64>,
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+/// Job-level details for GitHub Actions, including step breakdown.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JobDetail {
+    #[serde(default)]
+    pub job_id: Option<u64>,
+    pub name: String,
+    pub status: DeploymentStatus,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<JobStepSummary>,
+}
+
 /// Platform-specific metadata that doesn't fit the unified model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EventMetadata {
@@ -128,6 +154,9 @@ pub struct EventMetadata {
     /// GitHub: workflow job summaries (pipeline stages).
     #[serde(default)]
     pub jobs: Vec<JobSummary>,
+    /// GitHub: per-job step details from the Actions jobs endpoint.
+    #[serde(default)]
+    pub job_details: Vec<JobDetail>,
 }
 
 #[cfg(test)]

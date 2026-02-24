@@ -26,6 +26,7 @@ use anyhow::Result;
 use crossterm::event::{self as ct_event, Event as CtEvent};
 use tokio::sync::{mpsc, watch};
 
+use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::types::PulsosConfig;
 
 use self::actions::{ActionRequest, ActionResult};
@@ -76,16 +77,27 @@ pub async fn run_tui(
     // Create settings action channels.
     let (action_req_tx, action_req_rx) = mpsc::channel::<ActionRequest>(8);
     let (action_result_tx, mut action_result_rx) = mpsc::channel::<ActionResult>(8);
+    let cache = match CacheStore::open_or_temporary() {
+        Ok(c) => std::sync::Arc::new(c),
+        Err(e) => {
+            // Terminal is already in raw mode; restore it before returning.
+            tui_active.set_active(false);
+            terminal::teardown(&mut term)?;
+            return Err(e.into());
+        }
+    };
 
     // Spawn the background data poller (or connect to daemon if running).
     let poller_config = config.clone();
+    let poller_cache = cache.clone();
     tokio::spawn(async move {
-        poll::run_poller_or_daemon_client(poller_config, data_tx, poller_rx).await;
+        poll::run_poller_or_daemon_client(poller_config, data_tx, poller_rx, poller_cache).await;
     });
 
     // Spawn settings action worker.
+    let action_cache = cache.clone();
     tokio::spawn(async move {
-        actions::run_worker(config_path, action_req_rx, action_result_tx).await;
+        actions::run_worker(config_path, action_req_rx, action_result_tx, action_cache).await;
     });
 
     // Forward action results into the main AppEvent stream.
@@ -155,6 +167,8 @@ pub async fn run_tui(
             let snapshot = data_rx.borrow_and_update().clone();
             app.data = snapshot;
             app.clamp_selection();
+            app.ensure_platform_tree_state();
+            app.sync_platform_details_with_data();
         }
 
         // Render the current frame.
@@ -173,6 +187,9 @@ pub async fn run_tui(
                 // Handle force refresh: if the key handler sets the flag,
                 // send a signal to the poller.
                 keys::handle_key(&mut app, key);
+                app.clamp_selection();
+                app.ensure_platform_tree_state();
+                app.sync_platform_details_with_data();
                 if app.force_refresh {
                     let _ = poller_tx.try_send(PollerCommand::ForceRefresh);
                     app.force_refresh = false;

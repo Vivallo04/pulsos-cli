@@ -31,7 +31,7 @@ impl TrayManager {
         let menu = Menu::new();
         menu.append_items(&[&open_item, &PredefinedMenuItem::separator(), &quit_item])?;
 
-        let icon = load_embedded_icon(include_bytes!("../../assets/icon-neutral.png"));
+        let icon = load_embedded_icon(include_bytes!("../../assets/pulsos-neutral.png"));
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("Pulsos: Monitoring")
@@ -49,19 +49,19 @@ impl TrayManager {
     pub fn set_state(&self, state: &TrayState) {
         match state {
             TrayState::Neutral => {
-                let icon = load_embedded_icon(include_bytes!("../../assets/icon-neutral.png"));
+                let icon = load_embedded_icon(include_bytes!("../../assets/pulsos-neutral.png"));
                 self.tray.set_icon(Some(icon)).ok();
                 self.tray
                     .set_tooltip(Some("Pulsos: All Systems Operational"))
                     .ok();
             }
             TrayState::Syncing => {
-                let icon = load_embedded_icon(include_bytes!("../../assets/icon-sync.png"));
+                let icon = load_embedded_icon(include_bytes!("../../assets/pulsos-syncing.png"));
                 self.tray.set_icon(Some(icon)).ok();
                 self.tray.set_tooltip(Some("Pulsos: Syncing\u{2026}")).ok();
             }
             TrayState::Alert(msg) => {
-                let icon = load_embedded_icon(include_bytes!("../../assets/icon-alert.png"));
+                let icon = load_embedded_icon(include_bytes!("../../assets/pulsos-alert.png"));
                 self.tray.set_icon(Some(icon)).ok();
                 self.tray.set_tooltip(Some(msg.as_str())).ok();
             }

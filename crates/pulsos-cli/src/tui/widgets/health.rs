@@ -17,7 +17,7 @@ use ratatui::{
 };
 
 use crate::output::table::format_age;
-use crate::tui::app::App;
+use crate::tui::app::{App, HealthGroup};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::{draw_search_bar, split_search_bar, status_spans};
 use pulsos_core::domain::health::HealthBreakdown;
@@ -28,12 +28,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let (search_area, area) = split_search_bar(area, app);
     if let Some(sa) = search_area {
         draw_search_bar(frame, sa, app, theme);
-    }
-
-    if app.data.health_scores.is_empty() {
-        let msg = Paragraph::new("No health data available.").style(theme.t7());
-        frame.render_widget(msg, area);
-        return;
     }
 
     let panes = Layout::horizontal([Constraint::Length(34), Constraint::Min(0)]).split(area);
@@ -49,43 +43,58 @@ fn draw_project_list(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .map(|h| Cell::from(*h).style(theme.t4()));
     let header = Row::new(header_cells).height(1);
 
-    let rows: Vec<Row> = app
-        .data
-        .health_scores
-        .iter()
-        .enumerate()
-        .map(|(i, (name, score))| {
-            let is_selected = i == app.selected_row;
-            let row_style = if is_selected {
-                theme.selected_row()
-            } else {
-                ratatui::style::Style::default()
-            };
+    let grouped = app.health_grouped_rows();
+    let selected_name = app.selected_health_project().map(|row| row.name);
+    let mut selected_table_row: Option<usize> = None;
+    let mut rows: Vec<Row> = Vec::new();
 
-            let score_color = theme.health_color(*score);
+    for group in HealthGroup::ALL {
+        rows.push(
+            Row::new(vec![
+                Cell::from(Span::styled(group.label(), theme.t4().bold())),
+                Cell::from(""),
+                Cell::from(""),
+            ])
+            .height(1),
+        );
+
+        let group_rows: Vec<_> = grouped.iter().filter(|row| row.group == group).collect();
+        if group_rows.is_empty() {
+            rows.push(Row::new(vec![
+                Cell::from(Span::styled("  (no projects)", theme.t8())),
+                Cell::from(""),
+                Cell::from(""),
+            ]));
+            continue;
+        }
+
+        for row in group_rows {
+            let score_color = theme.health_color(row.score);
             let score_style = ratatui::style::Style::new().fg(score_color).bold();
+            let trend = render_sparkline_text(&row.name, &app.data.health_history);
+            let status_label = health_status_label(row.score);
 
-            let trend = render_sparkline_text(name, &app.data.health_history);
-            let status_label = health_status_label(*score);
-
-            // 2-row cell: row 1 = project name, row 2 = indented status label
             let name_cell = Cell::from(vec![
-                Line::from(Span::styled(truncate_str(name, 18), theme.t5())),
+                Line::from(Span::styled(truncate_str(&row.name, 18), theme.t5())),
                 Line::from(vec![
                     Span::raw("  "),
                     Span::styled(status_label, ratatui::style::Style::new().fg(score_color)),
                 ]),
             ]);
 
-            Row::new(vec![
-                name_cell,
-                Cell::from(Span::styled(format!("{score:>3}"), score_style)),
-                Cell::from(Span::styled(trend, theme.t8())),
-            ])
-            .height(2)
-            .style(row_style)
-        })
-        .collect();
+            if selected_name.as_deref() == Some(row.name.as_str()) {
+                selected_table_row = Some(rows.len());
+            }
+            rows.push(
+                Row::new(vec![
+                    name_cell,
+                    Cell::from(Span::styled(format!("{:>3}", row.score), score_style)),
+                    Cell::from(Span::styled(trend, theme.t8())),
+                ])
+                .height(2),
+            );
+        }
+    }
 
     let widths = [
         Constraint::Length(18), // Project
@@ -100,11 +109,8 @@ fn draw_project_list(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .highlight_symbol("▶ ");
 
     let mut table_state = TableState::default();
-    if !app.data.health_scores.is_empty() {
-        table_state.select(Some(
-            app.selected_row
-                .min(app.data.health_scores.len().saturating_sub(1)),
-        ));
+    if let Some(selected) = selected_table_row {
+        table_state.select(Some(selected));
     }
 
     frame.render_stateful_widget(table, area, &mut table_state);
@@ -118,23 +124,27 @@ fn draw_detail_panel(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let selected = app
-        .selected_row
-        .min(app.data.health_scores.len().saturating_sub(1));
-
-    let (project_name, score) = match app.data.health_scores.get(selected) {
-        Some((name, score)) => (name.as_str(), *score),
-        None => return,
+    let selected = match app.selected_health_project() {
+        Some(row) => row,
+        None => {
+            frame.render_widget(
+                Paragraph::new(" No health data available.").style(theme.t8()),
+                inner,
+            );
+            return;
+        }
     };
+    let project_name = selected.name;
+    let score = selected.score;
 
     let breakdown = app
         .data
         .health_breakdowns
         .iter()
-        .find(|(n, _)| n == project_name)
+        .find(|(n, _)| n == &project_name)
         .map(|(_, bd)| bd);
 
-    let telemetry = app.data.telemetry.get(project_name);
+    let telemetry = app.data.telemetry.get(&project_name);
 
     let sections = Layout::vertical([
         Constraint::Length(2), // Header
@@ -165,13 +175,13 @@ fn draw_detail_panel(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     draw_weight_bars(frame, sections[1], breakdown, theme);
 
     // Section 3: Recent Events
-    draw_recent_events(frame, sections[2], project_name, app, theme);
+    draw_recent_events(frame, sections[2], &project_name, app, theme);
 
     // Section 4: Telemetry (Railway metrics + Ping Engine)
     draw_telemetry(frame, sections[3], telemetry, theme);
 
     // Section 5: History sparkline + latency sparkline
-    draw_history_sparkline(frame, sections[4], project_name, telemetry, app, theme);
+    draw_history_sparkline(frame, sections[4], &project_name, telemetry, app, theme);
 }
 
 /// Render the TELEMETRY section: Railway container stats + latest ping result.
@@ -666,6 +676,31 @@ mod tests {
 
         let empty = render_sparkline_text("nonexistent", &history);
         assert_eq!(empty, "—");
+    }
+
+    #[test]
+    fn health_renders_group_sections_and_empty_placeholders() {
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let data = DataSnapshot {
+            health_scores: vec![("only-rw".into(), 88)],
+            health_project_groups: vec![("only-rw".into(), crate::tui::app::HealthGroup::Railway)],
+            ..Default::default()
+        };
+        let app = App::new(data, TuiConfig::default(), LogRingBuffer::new());
+        let theme = Theme::dark();
+
+        terminal
+            .draw(|frame| {
+                draw(frame, frame.area(), &app, &theme);
+            })
+            .unwrap();
+
+        let text = buffer_to_string(&terminal.backend().buffer().clone());
+        assert!(text.contains("Railway"));
+        assert!(text.contains("Vercel"));
+        assert!(text.contains("GitHub-only"));
+        assert!(text.contains("(no"));
     }
 
     fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {

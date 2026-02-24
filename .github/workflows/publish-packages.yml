@@ -1,0 +1,191 @@
+name: Publish Packages
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish-homebrew:
+    name: Homebrew Tap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download SHA256SUMS
+        run: |
+          gh release download "$TAG" \
+            --pattern "SHA256SUMS.txt" \
+            --dir /tmp/release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Render formula
+        run: |
+          VERSION="${TAG#v}"
+          SUMS="/tmp/release-assets/SHA256SUMS.txt"
+
+          SHA_AARCH64_APPLE_DARWIN="$(grep "pulsos-aarch64-apple-darwin " "$SUMS" | awk '{print $1}')"
+          SHA_X86_64_APPLE_DARWIN="$(grep "pulsos-x86_64-apple-darwin " "$SUMS" | awk '{print $1}')"
+          SHA_AARCH64_UNKNOWN_LINUX_GNU="$(grep "pulsos-aarch64-unknown-linux-gnu " "$SUMS" | awk '{print $1}')"
+          SHA_X86_64_UNKNOWN_LINUX_GNU="$(grep "pulsos-x86_64-unknown-linux-gnu " "$SUMS" | awk '{print $1}')"
+
+          if [ -z "$SHA_AARCH64_APPLE_DARWIN" ] || [ -z "$SHA_X86_64_APPLE_DARWIN" ] || \
+             [ -z "$SHA_AARCH64_UNKNOWN_LINUX_GNU" ] || [ -z "$SHA_X86_64_UNKNOWN_LINUX_GNU" ]; then
+            echo "Missing checksum(s) for Homebrew formula"
+            exit 1
+          fi
+
+          sed \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{SHA256_AARCH64_APPLE_DARWIN}}/${SHA_AARCH64_APPLE_DARWIN}/g" \
+            -e "s/{{SHA256_X86_64_APPLE_DARWIN}}/${SHA_X86_64_APPLE_DARWIN}/g" \
+            -e "s/{{SHA256_AARCH64_UNKNOWN_LINUX_GNU}}/${SHA_AARCH64_UNKNOWN_LINUX_GNU}/g" \
+            -e "s/{{SHA256_X86_64_UNKNOWN_LINUX_GNU}}/${SHA_X86_64_UNKNOWN_LINUX_GNU}/g" \
+            release/homebrew/pulsos.rb > /tmp/pulsos.rb
+
+          if grep -q "{{" /tmp/pulsos.rb; then
+            echo "Unsubstituted placeholders remain in Homebrew formula"
+            exit 1
+          fi
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Push to tap repo
+        run: |
+          VERSION="${TAG#v}"
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Lambda-Inc/homebrew-tap.git" /tmp/homebrew-tap
+          mkdir -p /tmp/homebrew-tap/Formula
+          cp /tmp/pulsos.rb /tmp/homebrew-tap/Formula/pulsos.rb
+
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/pulsos.rb
+          if git diff --cached --quiet; then
+            echo "No Homebrew tap changes to commit"
+          else
+            git commit -m "pulsos: update to ${VERSION}"
+            git push
+          fi
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+
+  publish-aur:
+    name: AUR
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download SHA256SUMS
+        run: |
+          gh release download "$TAG" \
+            --pattern "SHA256SUMS.txt" \
+            --dir /tmp/release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Render PKGBUILD
+        run: |
+          VERSION="${TAG#v}"
+          SUMS="/tmp/release-assets/SHA256SUMS.txt"
+
+          SHA_X86_64_UNKNOWN_LINUX_GNU="$(grep "pulsos-x86_64-unknown-linux-gnu " "$SUMS" | awk '{print $1}')"
+
+          if [ -z "$SHA_X86_64_UNKNOWN_LINUX_GNU" ]; then
+            echo "Missing checksum for AUR PKGBUILD"
+            exit 1
+          fi
+
+          sed \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{SHA256_X86_64_UNKNOWN_LINUX_GNU}}/${SHA_X86_64_UNKNOWN_LINUX_GNU}/g" \
+            release/aur/PKGBUILD > /tmp/PKGBUILD
+
+          if grep -q "{{" /tmp/PKGBUILD; then
+            echo "Unsubstituted placeholders remain in AUR PKGBUILD"
+            exit 1
+          fi
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Deploy to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4
+        with:
+          pkgname: pulsos-bin
+          pkgbuild: /tmp/PKGBUILD
+          commit_username: github-actions[bot]
+          commit_email: github-actions[bot]@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.event.release.tag_name }}"
+
+  publish-scoop:
+    name: Scoop Bucket
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download SHA256SUMS
+        run: |
+          gh release download "$TAG" \
+            --pattern "SHA256SUMS.txt" \
+            --dir /tmp/release-assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Render manifest
+        run: |
+          VERSION="${TAG#v}"
+          SUMS="/tmp/release-assets/SHA256SUMS.txt"
+
+          SHA_X86_64_PC_WINDOWS_MSVC="$(grep "pulsos-x86_64-pc-windows-msvc.exe " "$SUMS" | awk '{print $1}')"
+
+          if [ -z "$SHA_X86_64_PC_WINDOWS_MSVC" ]; then
+            echo "Missing checksum for Scoop manifest"
+            exit 1
+          fi
+
+          sed \
+            -e "s/{{VERSION}}/${VERSION}/g" \
+            -e "s/{{SHA256_X86_64_PC_WINDOWS_MSVC}}/${SHA_X86_64_PC_WINDOWS_MSVC}/g" \
+            release/scoop/pulsos.json > /tmp/pulsos.json
+
+          if grep -q "{{" /tmp/pulsos.json; then
+            echo "Unsubstituted placeholders remain in Scoop manifest"
+            exit 1
+          fi
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Push to scoop bucket
+        run: |
+          VERSION="${TAG#v}"
+
+          git clone "https://x-access-token:${SCOOP_BUCKET_TOKEN}@github.com/Lambda-Inc/scoop-bucket.git" /tmp/scoop-bucket
+          mkdir -p /tmp/scoop-bucket/bucket
+          cp /tmp/pulsos.json /tmp/scoop-bucket/bucket/pulsos.json
+
+          cd /tmp/scoop-bucket
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/pulsos.json
+          if git diff --cached --quiet; then
+            echo "No Scoop bucket changes to commit"
+          else
+            git commit -m "pulsos: update to ${VERSION}"
+            git push
+          fi
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}

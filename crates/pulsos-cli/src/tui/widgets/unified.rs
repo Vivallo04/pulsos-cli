@@ -23,8 +23,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     }
 
     // Conditionally reserve space for the DORA banner above the table.
-    let has_dora = app.data.dora_metrics.deployment_frequency > 0
-        || app.data.dora_metrics.lead_time_for_changes.is_some();
+    let has_dora = app.data.dora_history_count > 0;
 
     let (dora_area, table_area) = if has_dora {
         let chunks = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
