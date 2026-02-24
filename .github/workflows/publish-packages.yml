@@ -5,6 +5,10 @@ on:
     types: [published]
   workflow_call:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
 
 permissions:
   contents: read
@@ -25,7 +29,7 @@ jobs:
           sed -i 's/\r$//' /tmp/release-assets/SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Render formula
         run: |
@@ -56,7 +60,7 @@ jobs:
             exit 1
           fi
         env:
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Push to tap repo
         run: |
@@ -74,11 +78,11 @@ jobs:
             echo "No Homebrew tap changes to commit"
           else
             git commit -m "pulsos: update to ${VERSION}"
-            git push
+            git push -u origin HEAD
           fi
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
   publish-aur:
     name: AUR
@@ -96,7 +100,7 @@ jobs:
           sed -i 's/\r$//' /tmp/release-assets/SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Render PKGBUILD
         run: |
@@ -120,7 +124,7 @@ jobs:
             exit 1
           fi
         env:
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Deploy to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v4
@@ -130,7 +134,7 @@ jobs:
           commit_username: github-actions[bot]
           commit_email: github-actions[bot]@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ github.event.release.tag_name || github.ref_name }}"
+          commit_message: "Update to ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}"
 
   publish-scoop:
     name: Scoop Bucket
@@ -147,7 +151,7 @@ jobs:
           sed -i 's/\r$//' /tmp/release-assets/SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Render manifest
         run: |
@@ -171,7 +175,7 @@ jobs:
             exit 1
           fi
         env:
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
 
       - name: Push to scoop bucket
         run: |
@@ -189,8 +193,8 @@ jobs:
             echo "No Scoop bucket changes to commit"
           else
             git commit -m "pulsos: update to ${VERSION}"
-            git push
+            git push -u origin HEAD
           fi
         env:
           SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref_name }}
