@@ -30,11 +30,10 @@ use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::types::PulsosConfig;
 
 use self::actions::{ActionRequest, ActionResult};
-use self::app::{App, DataSnapshot};
+use self::app::{App, DataSnapshot, Tab};
 use self::event::AppEvent;
 use self::log_buffer::{LogRingBuffer, TuiActiveFlag};
 use self::poll::PollerCommand;
-use self::theme::Theme;
 
 /// Run the live-updating TUI dashboard.
 ///
@@ -60,9 +59,6 @@ pub async fn run_tui(
             return Err(e);
         }
     };
-
-    // Resolve theme from config + environment.
-    let theme = Theme::resolve(&config.tui.theme);
 
     // Create the data channel (poller → main loop).
     let initial_snapshot = DataSnapshot::default();
@@ -117,6 +113,10 @@ pub async fn run_tui(
     // Spawn the tick generator.
     let fps = config.tui.fps.max(1);
     let tick_interval = Duration::from_millis(1000 / fps);
+    // Daemon status refresh is throttled to ~once per second (one full tick cycle).
+    // Pre-loading the counter so the very first Settings visit triggers a check.
+    let daemon_status_interval: u32 = fps as u32;
+    let mut daemon_check_ticks: u32 = daemon_status_interval;
     let tick_tx = event_tx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tick_interval);
@@ -173,7 +173,7 @@ pub async fn run_tui(
 
         // Render the current frame.
         term.draw(|frame| {
-            render::draw(frame, &app, &theme);
+            render::draw(frame, &app, &app.theme);
         })?;
 
         // Wait for the next event.
@@ -202,7 +202,16 @@ pub async fn run_tui(
                 }
             }
             AppEvent::Tick => {
-                // Nothing to do — the render above already refreshes the UI.
+                if app.active_tab == Tab::Settings {
+                    daemon_check_ticks = daemon_check_ticks.saturating_add(1);
+                    if daemon_check_ticks >= daemon_status_interval {
+                        daemon_check_ticks = 0;
+                        app.refresh_daemon_status();
+                    }
+                } else {
+                    // Reset so the check fires immediately on the next Settings visit.
+                    daemon_check_ticks = daemon_status_interval;
+                }
             }
             AppEvent::Resize(w, h) => {
                 app.terminal_size = (w, h);

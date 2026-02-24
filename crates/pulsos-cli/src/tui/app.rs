@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::actions::{ActionRequest, ActionResult};
 use super::log_buffer::{LogEntry, LogRingBuffer};
 use super::settings_flow::{OnboardingState, SettingsFlowState};
+use super::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlatformSubtab {
@@ -397,6 +398,14 @@ pub struct App {
     pub platform_details_mode: Option<PlatformDetailsState>,
     /// Active provider subtab inside the Platform tab.
     pub platform_subtab: PlatformSubtab,
+    /// True when the general settings panel is open.
+    pub settings_general_mode: bool,
+    /// Cursor row inside the general settings panel (0=daemon, 1=theme, 2=fps).
+    pub settings_general_cursor: usize,
+    /// Live theme for the current session.
+    pub theme: Theme,
+    /// Whether the daemon process is currently running (polled on each Tick in Settings tab).
+    pub daemon_running: bool,
 }
 
 impl App {
@@ -407,6 +416,7 @@ impl App {
             "settings" => Tab::Settings,
             _ => Tab::Unified,
         };
+        let theme = Theme::resolve(&tui_config.theme);
 
         Self {
             active_tab: default_tab,
@@ -432,6 +442,10 @@ impl App {
             unified_sort: UnifiedSort::default(),
             platform_details_mode: None,
             platform_subtab: PlatformSubtab::GitHub,
+            settings_general_mode: false,
+            settings_general_cursor: 0,
+            theme,
+            daemon_running: false,
         }
     }
 
@@ -1156,6 +1170,11 @@ impl App {
         self.pending_action.take()
     }
 
+    /// Refresh `daemon_running` by checking whether the daemon PID is alive.
+    pub fn refresh_daemon_status(&mut self) {
+        self.daemon_running = is_daemon_running();
+    }
+
     pub fn handle_action_result(&mut self, result: ActionResult) -> ActionOutcome {
         let mut outcome = ActionOutcome::default();
 
@@ -1238,6 +1257,29 @@ impl App {
                 outcome.force_refresh = true;
                 self.onboarding.reset();
             }
+            ActionResult::DaemonStarted => {
+                self.daemon_running = true;
+                self.settings_message = Some("daemon started".to_string());
+                self.settings_flow = SettingsFlowState::Idle;
+            }
+            ActionResult::DaemonStopped => {
+                self.daemon_running = false;
+                self.settings_message = Some("daemon stopped".to_string());
+                self.settings_flow = SettingsFlowState::Idle;
+            }
+            ActionResult::DaemonAlreadyRunning => {
+                self.daemon_running = true;
+                self.settings_message = Some("daemon is already running".to_string());
+                self.settings_flow = SettingsFlowState::Idle;
+            }
+            ActionResult::DaemonNotRunning => {
+                self.daemon_running = false;
+                self.settings_message = Some("daemon is not running".to_string());
+                self.settings_flow = SettingsFlowState::Idle;
+            }
+            ActionResult::TuiConfigSaved => {
+                self.settings_flow = SettingsFlowState::Idle;
+            }
             ActionResult::Error { context, message } => {
                 self.settings_message = Some(format!("error: {context}: {message}"));
                 self.settings_flow = SettingsFlowState::ValidationResult;
@@ -1246,6 +1288,47 @@ impl App {
         }
 
         outcome
+    }
+}
+
+/// Check whether the daemon process is alive by reading its PID file.
+///
+/// On Unix this uses `/proc/<pid>` (Linux) or a stderr-suppressed `kill -0`
+/// (macOS). Stderr is always redirected to null so stale-PID messages never
+/// leak into the TUI. When the process is confirmed dead the stale PID file
+/// is removed so subsequent Tick polls skip the subprocess entirely.
+fn is_daemon_running() -> bool {
+    let Some(path) = dirs::config_dir().map(|d| d.join("pulsos").join("daemon.pid")) else {
+        return false;
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(pid) = content.trim().parse::<u32>() else {
+        return false;
+    };
+
+    #[cfg(unix)]
+    {
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null()) // suppress "No such process"
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        if !alive {
+            // Remove the stale PID file so future Tick polls skip this check.
+            let _ = std::fs::remove_file(&path);
+        }
+        alive
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
     }
 }
 

@@ -127,6 +127,17 @@ fn run_tray_event_loop(
     let mut notifier = NotificationState::new();
     let mut tray_rx = broadcast_tx.subscribe();
 
+    // On macOS, set activation policy to Accessory so the process is hidden
+    // from the Dock and ⌘-Tab switcher — only the status-bar icon is visible.
+    #[cfg(target_os = "macos")]
+    let mut event_loop = EventLoopBuilder::<()>::with_user_event().build();
+    #[cfg(target_os = "macos")]
+    {
+        use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+        event_loop.set_activation_policy(ActivationPolicy::Accessory);
+    }
+
+    #[cfg(not(target_os = "macos"))]
     let event_loop = EventLoopBuilder::<()>::with_user_event().build();
     let quit_id = tray_manager.quit_id.clone();
     let open_id = tray_manager.open_id.clone();

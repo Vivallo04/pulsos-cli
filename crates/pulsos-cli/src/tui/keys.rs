@@ -4,6 +4,7 @@ use super::actions::ActionRequest;
 use super::app::{App, DetailsFocus, InputMode, PlatformSubtab, Tab};
 use super::log_buffer::LogEntry;
 use super::settings_flow::SettingsFlowState;
+use super::theme::Theme;
 use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[cfg(not(test))]
@@ -252,6 +253,11 @@ fn handle_platform_details_mode(app: &mut App, key: KeyEvent) -> bool {
 }
 
 fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
+    // General settings panel takes priority when open.
+    if app.settings_general_mode {
+        return handle_settings_general_mode(app, key);
+    }
+
     match app.settings_flow {
         SettingsFlowState::TokenEntry => {
             match key.code {
@@ -376,6 +382,11 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
     }
 
     match key.code {
+        KeyCode::Char('g') => {
+            app.settings_general_mode = true;
+            app.settings_general_cursor = 0;
+            true
+        }
         KeyCode::Esc => {
             app.settings_flow = SettingsFlowState::Idle;
             app.onboarding.reset();
@@ -435,6 +446,85 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) -> bool {
         }
         _ => false,
     }
+}
+
+fn handle_settings_general_mode(app: &mut App, key: KeyEvent) -> bool {
+    const FPS_STEPS: [u64; 4] = [10, 20, 30, 60];
+
+    match key.code {
+        KeyCode::Esc => {
+            app.settings_general_mode = false;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.settings_general_cursor = (app.settings_general_cursor + 1).min(2);
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.settings_general_cursor = app.settings_general_cursor.saturating_sub(1);
+        }
+        KeyCode::Char(' ') | KeyCode::Enter => match app.settings_general_cursor {
+            0 => {
+                // Daemon toggle — keep current flow so Applying never blocks input
+                let flow = app.settings_flow;
+                if app.daemon_running {
+                    app.queue_action(ActionRequest::StopDaemon, flow);
+                } else {
+                    app.queue_action(ActionRequest::StartDaemon, flow);
+                }
+            }
+            1 => {
+                // Theme toggle
+                let new_theme = if app.tui_config.theme.to_ascii_lowercase() == "dark" {
+                    "light"
+                } else {
+                    "dark"
+                };
+                app.tui_config.theme = new_theme.to_string();
+                app.theme = Theme::resolve(new_theme);
+                let current_flow = app.settings_flow;
+                app.queue_action(
+                    ActionRequest::SaveTuiConfig {
+                        tui: Box::new(app.tui_config.clone()),
+                    },
+                    current_flow,
+                );
+            }
+            _ => {}
+        },
+        KeyCode::Left if app.settings_general_cursor == 2 => {
+            let idx = FPS_STEPS
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, &f)| (f as i64 - app.tui_config.fps as i64).unsigned_abs())
+                .map(|(i, _)| i)
+                .unwrap_or(2);
+            app.tui_config.fps = FPS_STEPS[idx.saturating_sub(1)];
+            let current_flow = app.settings_flow;
+            app.queue_action(
+                ActionRequest::SaveTuiConfig {
+                    tui: Box::new(app.tui_config.clone()),
+                },
+                current_flow,
+            );
+        }
+        KeyCode::Right if app.settings_general_cursor == 2 => {
+            let idx = FPS_STEPS
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, &f)| (f as i64 - app.tui_config.fps as i64).unsigned_abs())
+                .map(|(i, _)| i)
+                .unwrap_or(2);
+            app.tui_config.fps = FPS_STEPS[(idx + 1).min(FPS_STEPS.len() - 1)];
+            let current_flow = app.settings_flow;
+            app.queue_action(
+                ActionRequest::SaveTuiConfig {
+                    tui: Box::new(app.tui_config.clone()),
+                },
+                current_flow,
+            );
+        }
+        _ => {}
+    }
+    true
 }
 
 fn handle_search_mode(app: &mut App, key: KeyEvent) {

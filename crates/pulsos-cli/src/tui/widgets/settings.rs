@@ -2,8 +2,9 @@
 
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    text::Span,
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap},
     Frame,
 };
 
@@ -38,10 +39,17 @@ mod copy {
 }
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    if app.settings_general_mode {
+        draw_general_panel(frame, area, app, theme);
+        return;
+    }
+
     if app.data.platform_health.is_empty() {
-        let msg = Paragraph::new("No platform health data yet.")
-            .style(theme.t7())
-            .block(Block::default().borders(Borders::NONE));
+        let msg = Paragraph::new(
+            "No platform health data yet.\n\ng  General settings  (daemon, theme, fps)",
+        )
+        .style(theme.t7())
+        .block(Block::default().borders(Borders::NONE));
         frame.render_widget(msg, area);
         return;
     }
@@ -109,6 +117,102 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             );
         frame.render_widget(detail_widget, chunks[1]);
     }
+}
+
+fn draw_general_panel(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    // Panel title + separator + 3 rows + separator + hint = 8 lines; use full area.
+    let items: &[(&str, fn(&App, &Theme) -> String)] = &[
+        ("Daemon", daemon_value),
+        ("Theme", theme_value),
+        ("FPS", fps_value),
+    ];
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " General Settings",
+        theme.t5(),
+    )));
+    lines.push(Line::from(Span::styled(
+        "─".repeat(area.width.saturating_sub(2) as usize),
+        theme.panel_border(),
+    )));
+
+    for (idx, (label, value_fn)) in items.iter().enumerate() {
+        let is_selected = idx == app.settings_general_cursor;
+        let pointer = if is_selected { "▶ " } else { "  " };
+        let value = value_fn(app, theme);
+        let hint = match idx {
+            0 | 1 => "  [Space] toggle",
+            _ => "  [←/→] change",
+        };
+        let row_style = if is_selected {
+            theme.selected_row()
+        } else {
+            Style::default()
+        };
+        let line = Line::styled(
+            format!("{pointer}{label:<10}  {value}{hint}"),
+            row_style,
+        );
+        lines.push(line);
+    }
+
+    lines.push(Line::from(Span::styled(
+        "─".repeat(area.width.saturating_sub(2) as usize),
+        theme.panel_border(),
+    )));
+    lines.push(Line::from(Span::styled("  Esc to close", theme.t8())));
+
+    let panel = Paragraph::new(lines)
+        .style(theme.t6())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.panel_border_focus())
+                .title(Span::styled(" General ", theme.t6())),
+        )
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(panel, area);
+}
+
+fn daemon_value(app: &App, theme: &Theme) -> String {
+    let _ = theme;
+    if app.daemon_running {
+        "● Running  ".to_string()
+    } else {
+        "○ Stopped  ".to_string()
+    }
+}
+
+fn theme_value(app: &App, _theme: &Theme) -> String {
+    if app.tui_config.theme.to_ascii_lowercase() == "light" {
+        "□ Dark  ■ Light".to_string()
+    } else {
+        "■ Dark  □ Light".to_string()
+    }
+}
+
+fn fps_value(app: &App, _theme: &Theme) -> String {
+    const FPS_STEPS: [u64; 4] = [10, 20, 30, 60];
+    let fps = app.tui_config.fps;
+    let mut tokens: Vec<String> = FPS_STEPS
+        .iter()
+        .map(|&f| {
+            if f == fps {
+                format!("[{f}]")
+            } else {
+                format!(" {f} ")
+            }
+        })
+        .collect();
+    // If the configured value is not one of the preset steps, append it so the
+    // UI always shows the active setting (e.g. "[15?]" for a custom fps=15).
+    if !FPS_STEPS.contains(&fps) {
+        tokens.push(format!("[{fps}?]"));
+    }
+    tokens.join("  ")
 }
 
 fn state_style(state: PlatformHealthState, theme: &Theme) -> ratatui::style::Style {
@@ -225,6 +329,9 @@ fn render_detail(report: &PlatformHealthReport, app: &App) -> String {
         }
         SettingsFlowState::ValidationResult | SettingsFlowState::Idle => {}
     }
+
+    lines.push(String::new());
+    lines.push("g  General settings".to_string());
 
     lines.push(String::new());
     lines.push(copy::PROVIDER_STATS.to_string());

@@ -14,7 +14,9 @@ use crate::tui::theme::Theme;
 
 mod copy {
     pub const SETTINGS_IDLE: &str =
-        "[Enter] onboard  [t/T] token  [v] validate  [x] remove  [r] refresh";
+        "[Enter] onboard  [t/T] token  [v] validate  [x] remove  [r] refresh  [g] general";
+    pub const SETTINGS_GENERAL: &str =
+        "[↑↓] move  [Space/↵] toggle  [←/→] fps  [Esc] close";
     pub const SETTINGS_PROVIDER_SELECT: &str =
         "[↑↓] move  [Space] toggle  [Enter] discover  [Esc] cancel";
     pub const SETTINGS_RESOURCE_SELECT: &str =
@@ -70,10 +72,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 /// Normal-mode keybinding line: `[key] desc` pairs.
 fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
     if app.active_tab == Tab::Settings {
-        return Line::from(Span::styled(
-            settings_help_text(app.settings_flow).to_string(),
-            theme.keybind_desc(),
-        ));
+        let text = if app.settings_general_mode {
+            copy::SETTINGS_GENERAL.to_string()
+        } else {
+            settings_help_text(app.settings_flow).to_string()
+        };
+        return Line::from(Span::styled(text, theme.keybind_desc()));
     }
     if app.active_tab == Tab::Platform && app.platform_details_active() {
         return Line::from(Span::styled(
