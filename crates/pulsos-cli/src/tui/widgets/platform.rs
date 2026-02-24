@@ -206,7 +206,7 @@ fn draw_github_table(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 .metadata
                 .source_id
                 .as_deref()
-                .and_then(|s| s.split('/').last())
+                .and_then(|s| s.split('/').next_back())
                 .unwrap_or("-");
             let sha = short_sha(event.commit_sha.as_deref());
             let branch = event.branch.as_deref().unwrap_or("-");
