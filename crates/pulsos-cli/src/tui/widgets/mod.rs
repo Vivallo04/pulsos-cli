@@ -8,6 +8,7 @@ pub mod platform;
 pub mod settings;
 pub mod unified;
 
+use chrono::Utc;
 use pulsos_core::domain::deployment::DeploymentStatus;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -53,7 +54,11 @@ pub fn status_spans(status: &DeploymentStatus, theme: &Theme) -> (String, String
     match status {
         DeploymentStatus::Success => ("● ".into(), "passed".into(), theme.success()),
         DeploymentStatus::Failed => ("✕ ".into(), "failed".into(), theme.failure()),
-        DeploymentStatus::InProgress => ("◐ ".into(), "running".into(), theme.active()),
+        DeploymentStatus::InProgress => {
+            const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+            let idx = ((Utc::now().timestamp_millis() / 120) as usize) % FRAMES.len();
+            (format!("{} ", FRAMES[idx]), "running".into(), theme.active())
+        }
         DeploymentStatus::Queued => ("◌ ".into(), "queued".into(), theme.neutral()),
         DeploymentStatus::Cancelled => ("○ ".into(), "cancelled".into(), theme.neutral()),
         DeploymentStatus::Skipped => ("○ ".into(), "skipped".into(), theme.neutral()),
