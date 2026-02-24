@@ -1,9 +1,4 @@
-██████╗ ██╗   ██╗██╗     ███████╗ ██████╗ ███████╗
-██╔══██╗██║   ██║██║     ██╔════╝██╔═══██╗██╔════╝
-██████╔╝██║   ██║██║     ███████╗██║   ██║███████╗
-██╔═══╝ ██║   ██║██║     ╚════██║██║   ██║╚════██║
-██║     ╚██████╔╝███████╗███████║╚██████╔╝███████║
-╚═╝      ╚═════╝ ╚══════╝╚══════╝ ╚═════╝ ╚══════╝
+# Pulsos CLI
 
 [![CI](https://github.com/Vivallo04/pulsos-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Vivallo04/pulsos-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
