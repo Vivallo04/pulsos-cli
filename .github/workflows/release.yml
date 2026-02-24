@@ -96,7 +96,9 @@ jobs:
           merge-multiple: true
 
       - name: Merge checksums
-        run: cat artifacts/*.sha256 > artifacts/SHA256SUMS.txt
+        run: |
+          cat artifacts/*.sha256 > artifacts/SHA256SUMS.txt
+          sed -i 's/\r$//' artifacts/SHA256SUMS.txt
 
       - name: Render Homebrew formula
         run: |

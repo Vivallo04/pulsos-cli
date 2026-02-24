@@ -22,6 +22,7 @@ jobs:
           gh release download "$TAG" \
             --pattern "SHA256SUMS.txt" \
             --dir /tmp/release-assets
+          sed -i 's/\r$//' /tmp/release-assets/SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || github.ref_name }}
@@ -92,6 +93,7 @@ jobs:
           gh release download "$TAG" \
             --pattern "SHA256SUMS.txt" \
             --dir /tmp/release-assets
+          sed -i 's/\r$//' /tmp/release-assets/SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || github.ref_name }}
@@ -142,6 +144,7 @@ jobs:
           gh release download "$TAG" \
             --pattern "SHA256SUMS.txt" \
             --dir /tmp/release-assets
+          sed -i 's/\r$//' /tmp/release-assets/SHA256SUMS.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || github.ref_name }}
