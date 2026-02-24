@@ -24,7 +24,7 @@ jobs:
             --dir /tmp/release-assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
       - name: Render formula
         run: |
@@ -55,7 +55,7 @@ jobs:
             exit 1
           fi
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
       - name: Push to tap repo
         run: |
@@ -77,7 +77,7 @@ jobs:
           fi
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
   publish-aur:
     name: AUR
@@ -94,14 +94,14 @@ jobs:
             --dir /tmp/release-assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
       - name: Render PKGBUILD
         run: |
           VERSION="${TAG#v}"
           SUMS="/tmp/release-assets/SHA256SUMS.txt"
 
-          SHA_X86_64_UNKNOWN_LINUX_GNU="$(grep "pulsos-x86_64-unknown-linux-gnu " "$SUMS" | awk '{print $1}')"
+          SHA_X86_64_UNKNOWN_LINUX_GNU="$(grep "pulsos-x86_64-unknown-linux-gnu$" "$SUMS" | awk '{print $1}')"
 
           if [ -z "$SHA_X86_64_UNKNOWN_LINUX_GNU" ]; then
             echo "Missing checksum for AUR PKGBUILD"
@@ -118,7 +118,7 @@ jobs:
             exit 1
           fi
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
       - name: Deploy to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v4
@@ -128,7 +128,7 @@ jobs:
           commit_username: github-actions[bot]
           commit_email: github-actions[bot]@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ github.event.release.tag_name }}"
+          commit_message: "Update to ${{ github.event.release.tag_name || github.ref_name }}"
 
   publish-scoop:
     name: Scoop Bucket
@@ -144,14 +144,14 @@ jobs:
             --dir /tmp/release-assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
       - name: Render manifest
         run: |
           VERSION="${TAG#v}"
           SUMS="/tmp/release-assets/SHA256SUMS.txt"
 
-          SHA_X86_64_PC_WINDOWS_MSVC="$(grep "pulsos-x86_64-pc-windows-msvc.exe " "$SUMS" | awk '{print $1}')"
+          SHA_X86_64_PC_WINDOWS_MSVC="$(grep "pulsos-x86_64-pc-windows-msvc.exe$" "$SUMS" | awk '{print $1}')"
 
           if [ -z "$SHA_X86_64_PC_WINDOWS_MSVC" ]; then
             echo "Missing checksum for Scoop manifest"
@@ -168,7 +168,7 @@ jobs:
             exit 1
           fi
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
       - name: Push to scoop bucket
         run: |
@@ -190,4 +190,4 @@ jobs:
           fi
         env:
           SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
