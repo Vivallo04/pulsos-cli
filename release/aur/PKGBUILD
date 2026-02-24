@@ -1,0 +1,16 @@
+# Maintainer: Vivallo04
+pkgname=pulsos-bin
+pkgver={{VERSION}}
+pkgrel=1
+pkgdesc="Cross-platform deployment monitoring CLI"
+arch=('x86_64')
+url="https://github.com/Vivallo04/pulsos-cli"
+license=('MIT')
+provides=('pulsos')
+conflicts=('pulsos')
+source_x86_64=("https://github.com/Vivallo04/pulsos-cli/releases/download/v${pkgver}/pulsos-x86_64-unknown-linux-gnu")
+sha256sums_x86_64=('{{SHA256_X86_64_UNKNOWN_LINUX_GNU}}')
+
+package() {
+    install -Dm755 "${srcdir}/pulsos-x86_64-unknown-linux-gnu" "${pkgdir}/usr/bin/pulsos"
+}

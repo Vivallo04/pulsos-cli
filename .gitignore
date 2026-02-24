@@ -1,4 +1,13 @@
 /target
 
-
 .DS_Store
+
+/debug
+
+**/*.rs.bk
+
+*.pdb
+
+**/mutants.out*/
+
+.idea/

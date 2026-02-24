@@ -1,0 +1,23 @@
+{
+  "version": "{{VERSION}}",
+  "description": "Cross-platform deployment monitoring CLI",
+  "homepage": "https://github.com/Vivallo04/pulsos-cli",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/Vivallo04/pulsos-cli/releases/download/v{{VERSION}}/pulsos-x86_64-pc-windows-msvc.exe",
+      "hash": "{{SHA256_X86_64_PC_WINDOWS_MSVC}}"
+    }
+  },
+  "bin": [["pulsos-x86_64-pc-windows-msvc.exe", "pulsos"]],
+  "checkver": {
+    "github": "https://github.com/Vivallo04/pulsos-cli"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/Vivallo04/pulsos-cli/releases/download/v$version/pulsos-x86_64-pc-windows-msvc.exe"
+      }
+    }
+  }
+}

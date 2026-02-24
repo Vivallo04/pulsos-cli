@@ -66,6 +66,9 @@ dirs = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Crypto / random
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+
 # Daemon / notifications
 notify-rust = "4"
 image = { version = "0.24", default-features = false, features = ["png"] }

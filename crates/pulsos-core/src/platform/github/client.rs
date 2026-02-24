@@ -1,6 +1,7 @@
 use crate::cache::store::CacheStore;
 use crate::domain::deployment::{
-    DeploymentEvent, DeploymentStatus, EventMetadata, JobSummary, Platform,
+    DeploymentEvent, DeploymentStatus, EventMetadata, JobDetail, JobStepSummary, JobSummary,
+    Platform,
 };
 use crate::error::PulsosError;
 use crate::platform::{
@@ -15,8 +16,8 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use super::types::{
-    GhCollaboratorPermission, GhOrg, GhRateLimit, GhRepo, GhUser, WorkflowJob,
-    WorkflowJobsResponse, WorkflowRun, WorkflowRunsResponse,
+    GhCollaboratorPermission, GhConclusion, GhOrg, GhRateLimit, GhRepo, GhRunStatus, GhUser,
+    WorkflowJob, WorkflowJobsResponse, WorkflowRun, WorkflowRunsResponse,
 };
 
 pub struct GitHubClient {
@@ -28,6 +29,32 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
+    fn workflow_state_to_status(
+        status: GhRunStatus,
+        conclusion: Option<GhConclusion>,
+    ) -> DeploymentStatus {
+        match status {
+            GhRunStatus::Completed => match conclusion {
+                Some(GhConclusion::Success)
+                | Some(GhConclusion::Neutral)
+                | Some(GhConclusion::Stale) => DeploymentStatus::Success,
+                Some(GhConclusion::Failure)
+                | Some(GhConclusion::StartupFailure)
+                | Some(GhConclusion::TimedOut) => DeploymentStatus::Failed,
+                Some(GhConclusion::Cancelled) => DeploymentStatus::Cancelled,
+                Some(GhConclusion::Skipped) => DeploymentStatus::Skipped,
+                Some(GhConclusion::ActionRequired) => DeploymentStatus::ActionRequired,
+                _ => DeploymentStatus::Unknown("unknown".into()),
+            },
+            GhRunStatus::InProgress => DeploymentStatus::InProgress,
+            GhRunStatus::Queued
+            | GhRunStatus::Waiting
+            | GhRunStatus::Requested
+            | GhRunStatus::Pending => DeploymentStatus::Queued,
+            GhRunStatus::Unknown => DeploymentStatus::Unknown("unknown".into()),
+        }
+    }
+
     pub fn new(token: SecretString, cache: Arc<CacheStore>) -> Result<Self, PulsosError> {
         Self::new_with_base_url(token, "https://api.github.com".into(), cache)
     }
@@ -346,33 +373,92 @@ impl GitHubClient {
 
     /// Convert a `WorkflowJob` to a `JobSummary`.
     fn job_to_summary(job: &WorkflowJob) -> JobSummary {
-        // Reuse WorkflowRun's status mapping via a temporary run
-        let status = match job.status {
-            super::types::GhRunStatus::Completed => match job.conclusion {
-                Some(super::types::GhConclusion::Success)
-                | Some(super::types::GhConclusion::Neutral)
-                | Some(super::types::GhConclusion::Stale) => DeploymentStatus::Success,
-                Some(super::types::GhConclusion::Failure)
-                | Some(super::types::GhConclusion::StartupFailure)
-                | Some(super::types::GhConclusion::TimedOut) => DeploymentStatus::Failed,
-                Some(super::types::GhConclusion::Cancelled) => DeploymentStatus::Cancelled,
-                Some(super::types::GhConclusion::Skipped) => DeploymentStatus::Skipped,
-                Some(super::types::GhConclusion::ActionRequired) => {
-                    DeploymentStatus::ActionRequired
-                }
-                _ => DeploymentStatus::Unknown("unknown".into()),
-            },
-            super::types::GhRunStatus::InProgress => DeploymentStatus::InProgress,
-            super::types::GhRunStatus::Queued
-            | super::types::GhRunStatus::Waiting
-            | super::types::GhRunStatus::Requested
-            | super::types::GhRunStatus::Pending => DeploymentStatus::Queued,
-            super::types::GhRunStatus::Unknown => DeploymentStatus::Unknown("unknown".into()),
-        };
+        let status = Self::workflow_state_to_status(job.status, job.conclusion);
         JobSummary {
             name: job.name.clone(),
             status,
         }
+    }
+
+    fn step_to_summary(step: &super::types::WorkflowStep) -> JobStepSummary {
+        let duration_secs = match (step.started_at, step.completed_at) {
+            (Some(start), Some(end)) => Some((end - start).num_seconds().max(0) as u64),
+            _ => None,
+        };
+        JobStepSummary {
+            number: step.number,
+            name: step.name.clone(),
+            status: Self::workflow_state_to_status(step.status, step.conclusion),
+            duration_secs,
+            started_at: step.started_at,
+            completed_at: step.completed_at,
+        }
+    }
+
+    fn job_to_detail(job: &WorkflowJob) -> JobDetail {
+        JobDetail {
+            job_id: Some(job.id),
+            name: job.name.clone(),
+            status: Self::workflow_state_to_status(job.status, job.conclusion),
+            html_url: job.html_url.clone(),
+            steps: job
+                .steps
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(Self::step_to_summary)
+                .collect(),
+        }
+    }
+
+    /// Fetch raw textual logs for a single workflow job.
+    ///
+    /// Uses `GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`.
+    /// GitHub may respond with a redirect to a temporary log URL; reqwest
+    /// follows redirects by default.
+    pub async fn fetch_job_log(&self, repo: &str, job_id: u64) -> Result<String, PulsosError> {
+        let url = format!("{}/repos/{repo}/actions/jobs/{job_id}/logs", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| PulsosError::Network {
+                platform: "GitHub".into(),
+                message: e.to_string(),
+                source: Some(e),
+            })?;
+
+        self.update_rate_limit(&resp).await;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(PulsosError::AuthFailed {
+                platform: "GitHub".into(),
+                reason: format!("HTTP {status}"),
+            });
+        }
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(PulsosError::RateLimited {
+                platform: "GitHub".into(),
+                reset_at: "unknown".into(),
+                remaining: 0,
+            });
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(PulsosError::ApiError {
+                platform: "GitHub".into(),
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        resp.text().await.map_err(|e| PulsosError::ParseError {
+            platform: "GitHub".into(),
+            message: e.to_string(),
+        })
     }
 
     fn run_to_event(run: &WorkflowRun, repo: &str, is_from_cache: bool) -> DeploymentEvent {
@@ -426,6 +512,8 @@ impl PlatformAdapter for GitHubClient {
                             {
                                 event.metadata.jobs =
                                     jobs.iter().map(Self::job_to_summary).collect();
+                                event.metadata.job_details =
+                                    jobs.iter().map(Self::job_to_detail).collect();
                             }
                         }
                         all_events.push(event);

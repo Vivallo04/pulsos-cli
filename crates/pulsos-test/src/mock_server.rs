@@ -14,7 +14,7 @@ impl MockGitHub {
 
         // GET /repos/{owner}/{repo}/actions/runs
         Mock::given(method("GET"))
-            .and(path_regex(r"^/repos/.+/.+/actions/runs"))
+            .and(path_regex(r"^/repos/.+/.+/actions/runs(?:\?.*)?$"))
             .and(header("Authorization", "Bearer test-github-token"))
             .respond_with(
                 ResponseTemplate::new(200)
@@ -23,6 +23,28 @@ impl MockGitHub {
                     .insert_header("x-ratelimit-remaining", "4999")
                     .insert_header("x-ratelimit-used", "1")
                     .insert_header("x-ratelimit-reset", "1739620000"),
+            )
+            .mount(&server)
+            .await;
+
+        // GET /repos/{owner}/{repo}/actions/runs/{id}/jobs
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/repos/.+/.+/actions/runs/\d+/jobs$"))
+            .and(header("Authorization", "Bearer test-github-token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(fixtures::github::workflow_jobs_response()),
+            )
+            .mount(&server)
+            .await;
+
+        // GET /repos/{owner}/{repo}/actions/jobs/{id}/logs
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/repos/.+/.+/actions/jobs/\d+/logs$"))
+            .and(header("Authorization", "Bearer test-github-token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("build\nstep: Checkout\nok\nstep: Build\nok\n"),
             )
             .mount(&server)
             .await;

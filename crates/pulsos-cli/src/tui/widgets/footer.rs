@@ -75,6 +75,12 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
             theme.keybind_desc(),
         ));
     }
+    if app.active_tab == Tab::Platform && app.platform_details_active() {
+        return Line::from(Span::styled(
+            "[↑↓] tree  [→] expand/open  [←] collapse/back  [PgUp/PgDn] log scroll  [Esc/d] close",
+            theme.keybind_desc(),
+        ));
+    }
 
     let entries: Vec<(&str, &str)> = vec![
         ("[q]", "quit"),
@@ -97,6 +103,10 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
         spans.push(Span::styled("[f]", theme.keybind_key()));
         spans.push(Span::styled(" ", theme.keybind_desc()));
         spans.push(Span::styled("filter", theme.keybind_desc()));
+        spans.push(Span::styled("  ", theme.keybind_desc()));
+        spans.push(Span::styled("[c]", theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled("copy", theme.keybind_desc()));
     }
     if app.active_tab == Tab::Unified {
         spans.push(Span::styled("  ", theme.keybind_desc()));
@@ -106,6 +116,20 @@ fn build_normal_help(app: &App, theme: &Theme) -> Line<'static> {
             format!("sort: {}", app.unified_sort.label()),
             theme.keybind_desc(),
         ));
+    }
+    if app.active_tab == Tab::Platform {
+        spans.push(Span::styled("  ", theme.keybind_desc()));
+        spans.push(Span::styled("[←/→]", theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled("subtab", theme.keybind_desc()));
+        spans.push(Span::styled("  ", theme.keybind_desc()));
+        spans.push(Span::styled("[g/w/v]", theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled("GH/RW/VC", theme.keybind_desc()));
+        spans.push(Span::styled("  ", theme.keybind_desc()));
+        spans.push(Span::styled("[d]", theme.keybind_key()));
+        spans.push(Span::styled(" ", theme.keybind_desc()));
+        spans.push(Span::styled("GH logs", theme.keybind_desc()));
     }
     Line::from(spans)
 }
@@ -190,14 +214,20 @@ pub fn render_help_text(app: &App) -> String {
             settings_help_text(app.settings_flow).to_string()
         }
         InputMode::Normal if app.active_tab == Tab::Logs => {
-            "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [f] filter"
-                .to_string()
+            "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [f] filter  [c] copy".to_string()
         }
         InputMode::Normal if app.active_tab == Tab::Unified => {
             format!(
                 "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [s] sort: {}",
                 app.unified_sort.label()
             )
+        }
+        InputMode::Normal if app.active_tab == Tab::Platform && app.platform_details_active() => {
+            "[↑↓] tree  [→] expand/open  [←] collapse/back  [PgUp/PgDn] log scroll  [Esc/d] close"
+                .to_string()
+        }
+        InputMode::Normal if app.active_tab == Tab::Platform => {
+            "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh  [←/→] subtab  [g/w/v] GH/RW/VC  [d] GH logs".to_string()
         }
         InputMode::Normal => {
             "[q] quit  [Tab] switch tab (1-5)  [↵] select  [/] search  [r] refresh".to_string()
@@ -291,6 +321,8 @@ mod tests {
         let text = render_help_text(&app);
         assert!(text.contains("[f]"));
         assert!(text.contains("filter"));
+        assert!(text.contains("[c]"));
+        assert!(text.contains("copy"));
     }
 
     #[test]

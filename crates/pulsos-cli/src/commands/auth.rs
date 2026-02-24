@@ -265,6 +265,13 @@ pub(crate) async fn auth_platform(
     let base_spec = auth_screen_spec(platform, step, token_help_lines(&platform), vec![]);
 
     // ── Direct token path (--token flag) ──────────────────────────────────────
+    if token.is_some() {
+        eprintln!(
+            "warning: tokens passed via CLI flags (including --token) are visible in \
+             process listings (ps aux). Prefer --from-env to read tokens \
+             from environment variables."
+        );
+    }
     if let Some(token_str) = token {
         let token_str = token_str.trim().to_string();
         if token_str.is_empty() {

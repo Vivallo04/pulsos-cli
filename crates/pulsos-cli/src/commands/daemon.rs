@@ -145,6 +145,7 @@ fn run_tray_event_loop(
             if menu_event.id == quit_id {
                 let _ = std::fs::remove_file(&pid_file);
                 let _ = std::fs::remove_file(port_path());
+                let _ = std::fs::remove_file(config_dir().join("daemon.token"));
                 *control_flow = ControlFlow::Exit;
             } else if menu_event.id == open_id {
                 launch_terminal_tui();
@@ -194,6 +195,7 @@ pub async fn execute(
                     .context("failed to send SIGTERM to daemon")?;
                 let _ = std::fs::remove_file(pid_path());
                 let _ = std::fs::remove_file(port_path());
+                let _ = std::fs::remove_file(config_dir().join("daemon.token"));
                 println!("Daemon (PID {pid}) stopped.");
             }
             #[cfg(windows)]
@@ -204,6 +206,7 @@ pub async fn execute(
                     .context("failed to terminate daemon process")?;
                 let _ = std::fs::remove_file(pid_path());
                 let _ = std::fs::remove_file(port_path());
+                let _ = std::fs::remove_file(config_dir().join("daemon.token"));
                 println!("Daemon (PID {pid}) stopped.");
             }
         }

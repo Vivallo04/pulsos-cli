@@ -26,7 +26,6 @@ use pulsos_core::auth::PlatformKind;
 use pulsos_core::cache::store::CacheStore;
 use pulsos_core::config::types::{CorrelationConfig, PulsosConfig};
 use pulsos_core::correlation;
-use pulsos_core::domain::analytics::DoraMetrics;
 use pulsos_core::domain::deployment::DeploymentEvent;
 use pulsos_core::domain::health;
 use pulsos_core::domain::metrics::ProjectTelemetry;
@@ -40,7 +39,7 @@ use pulsos_core::platform::{PlatformAdapter, TrackedResource};
 use pulsos_core::scheduler::budget::RateLimitBudget;
 use pulsos_core::scheduler::poller::{stagger, BATCH_DELAY_SECS, BATCH_SIZE};
 
-use super::app::DataSnapshot;
+use super::app::{DataSnapshot, HealthGroup};
 
 #[derive(Debug, Clone)]
 pub enum PollerCommand {
@@ -73,6 +72,24 @@ fn combine_events(
     events.extend_from_slice(vercel);
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     events
+}
+
+fn build_health_project_groups(correlations: &[CorrelationConfig]) -> Vec<(String, HealthGroup)> {
+    let mut groups: Vec<(String, HealthGroup)> = Vec::new();
+    for corr in correlations {
+        if groups.iter().any(|(name, _)| name == &corr.name) {
+            continue;
+        }
+        let group = if corr.railway_project.is_some() {
+            HealthGroup::Railway
+        } else if corr.vercel_project.is_some() {
+            HealthGroup::Vercel
+        } else {
+            HealthGroup::GitHubOnly
+        };
+        groups.push((corr.name.clone(), group));
+    }
+    groups
 }
 
 async fn wait_for_next_cycle(
@@ -158,16 +175,9 @@ pub async fn run_poller(
     mut config: PulsosConfig,
     tx: watch::Sender<DataSnapshot>,
     mut command_rx: tokio::sync::mpsc::Receiver<PollerCommand>,
+    cache: Arc<CacheStore>,
 ) {
     let mut resources = PlatformResources::from_correlations(&config.correlations);
-
-    let cache = match CacheStore::open_or_temporary() {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            tracing::error!("Cache unavailable, poller cannot start: {e}");
-            return;
-        }
-    };
 
     let store: Arc<dyn CredentialStore> = match FallbackStore::new() {
         Ok(s) => Arc::new(s),
@@ -254,6 +264,9 @@ pub async fn run_poller(
             .iter()
             .map(|(name, history)| (name.clone(), history.iter().copied().collect()))
             .collect();
+        let pre_health_project_groups = build_health_project_groups(&config.correlations);
+        let pre_dora_metrics = DoraCalculator::compute(dora_history.make_contiguous());
+        let pre_dora_history_count = dora_history.len();
 
         let syncing_snapshot = DataSnapshot {
             events: pre_events,
@@ -261,11 +274,12 @@ pub async fn run_poller(
             health_scores: pre_health_scores,
             health_breakdowns: pre_health_breakdowns,
             health_history: pre_health_history,
+            health_project_groups: pre_health_project_groups,
             warnings: last_cycle_warnings.clone(),
             platform_health: last_platform_health.clone(),
             telemetry: last_telemetry.clone(),
-            dora_metrics: DoraMetrics::default(),
-            dora_history_count: 0,
+            dora_metrics: pre_dora_metrics,
+            dora_history_count: pre_dora_history_count,
             is_syncing: true,
             fetched_at: Utc::now(),
             last_cycle_started_at: cycle_started_at,
@@ -495,6 +509,7 @@ pub async fn run_poller(
             .iter()
             .map(|(name, history)| (name.clone(), history.iter().copied().collect()))
             .collect();
+        let health_project_groups = build_health_project_groups(&config.correlations);
 
         let cycle_completed_at = Utc::now();
         let snapshot = DataSnapshot {
@@ -503,6 +518,7 @@ pub async fn run_poller(
             health_scores,
             health_breakdowns,
             health_history: health_history_snapshot,
+            health_project_groups,
             warnings: warnings.clone(),
             platform_health: last_platform_health.clone(),
             telemetry: last_telemetry.clone(),
@@ -533,6 +549,17 @@ fn read_daemon_port() -> Option<u16> {
     std::fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
+/// Reads the daemon bearer token from `~/.config/pulsos/daemon.token`.
+fn read_daemon_token() -> Option<String> {
+    let path = dirs::config_dir()?.join("pulsos").join("daemon.token");
+    let token = std::fs::read_to_string(path).ok()?.trim().to_string();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
+}
+
 /// Returns `true` if the daemon's `/health` endpoint responds successfully.
 async fn ping_daemon(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{port}/health");
@@ -545,18 +572,31 @@ async fn ping_daemon(port: u16) -> bool {
 /// Streams `DataSnapshot` updates from a running daemon's SSE endpoint.
 ///
 /// Exits when the SSE connection is dropped or the watch channel is closed.
-async fn stream_from_daemon(port: u16, tx: watch::Sender<DataSnapshot>) {
+async fn stream_from_daemon(
+    port: u16,
+    token: &str,
+    tx: watch::Sender<DataSnapshot>,
+) -> Result<(), String> {
     use crate::daemon::server::DaemonStateEvent;
 
     let url = format!("http://127.0.0.1:{port}/api/stream");
-    let Ok(resp) = reqwest::get(&url).await else {
-        return;
-    };
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("daemon SSE request failed ({url}): {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "daemon SSE request failed ({url}): HTTP {}",
+            resp.status()
+        ));
+    }
     let mut stream = resp.bytes_stream();
 
     while let Some(Ok(chunk)) = stream.next().await {
         if tx.is_closed() {
-            return;
+            return Ok(());
         }
         // SSE data lines look like: "data: <json>\n\n"
         for line in chunk.split(|&b| b == b'\n') {
@@ -567,6 +607,7 @@ async fn stream_from_daemon(port: u16, tx: watch::Sender<DataSnapshot>) {
             }
         }
     }
+    Err("daemon SSE stream ended".to_string())
 }
 
 /// Transparent wrapper: connects to the daemon if one is running,
@@ -575,16 +616,24 @@ pub async fn run_poller_or_daemon_client(
     config: PulsosConfig,
     tx: watch::Sender<DataSnapshot>,
     command_rx: tokio::sync::mpsc::Receiver<PollerCommand>,
+    cache: Arc<CacheStore>,
 ) {
     if let Some(port) = read_daemon_port() {
         if ping_daemon(port).await {
-            tracing::info!("connecting to local daemon on port {port}");
-            stream_from_daemon(port, tx).await;
-            return;
+            if let Some(token) = read_daemon_token() {
+                tracing::info!("connecting to local daemon on port {port}");
+                match stream_from_daemon(port, &token, tx.clone()).await {
+                    Ok(()) => return,
+                    Err(err) => {
+                        tracing::warn!("{err}; falling back to direct polling");
+                    }
+                }
+            }
+            // No token file → fall through to direct polling (safe upgrade path).
         }
     }
-    // No daemon — poll platform APIs directly.
-    run_poller(config, tx, command_rx).await;
+    // No daemon or no token — poll platform APIs directly.
+    run_poller(config, tx, command_rx, cache).await;
 }
 
 #[cfg(test)]
@@ -626,6 +675,48 @@ mod tests {
         assert_eq!(resources.github[0].display_name, "my-saas");
         assert_eq!(resources.railway[0].display_name, "my-saas");
         assert_eq!(resources.vercel[0].group, Some("Lambda".into()));
+    }
+
+    #[test]
+    fn health_group_projection_prefers_railway_then_vercel_then_github_only() {
+        let correlations = vec![
+            CorrelationConfig {
+                name: "both".into(),
+                github_repo: Some("org/both".into()),
+                railway_project: Some("proj:svc:prod".into()),
+                railway_workspace: None,
+                railway_environment: None,
+                vercel_project: Some("prj-1".into()),
+                vercel_team: None,
+                branch_mapping: HashMap::new(),
+            },
+            CorrelationConfig {
+                name: "vc-only".into(),
+                github_repo: Some("org/vc-only".into()),
+                railway_project: None,
+                railway_workspace: None,
+                railway_environment: None,
+                vercel_project: Some("prj-2".into()),
+                vercel_team: None,
+                branch_mapping: HashMap::new(),
+            },
+            CorrelationConfig {
+                name: "gh-only".into(),
+                github_repo: Some("org/gh-only".into()),
+                railway_project: None,
+                railway_workspace: None,
+                railway_environment: None,
+                vercel_project: None,
+                vercel_team: None,
+                branch_mapping: HashMap::new(),
+            },
+        ];
+
+        let groups = build_health_project_groups(&correlations);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0], ("both".into(), HealthGroup::Railway));
+        assert_eq!(groups[1], ("vc-only".into(), HealthGroup::Vercel));
+        assert_eq!(groups[2], ("gh-only".into(), HealthGroup::GitHubOnly));
     }
 
     #[test]

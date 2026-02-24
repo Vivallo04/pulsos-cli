@@ -118,7 +118,16 @@ pub async fn execute(_args: DoctorArgs, config_path: Option<&Path>) -> Result<()
     }
     println!();
 
-    // Section 9: Summary
+    // Section 9: Daemon
+    let results = check_daemon().await;
+    print_section("Daemon");
+    for r in &results {
+        print_check(r);
+        count_issues(r, &mut total_warnings, &mut total_errors);
+    }
+    println!();
+
+    // Section 10: Summary
     print_summary(total_warnings, total_errors, &suggestions);
 
     Ok(())
@@ -553,6 +562,95 @@ fn check_cli_tools() -> Vec<CheckResult> {
                 "vercel CLI",
                 "not installed (not required)",
             ));
+        }
+    }
+
+    results
+}
+
+// ── Section 9: Daemon ──
+
+async fn check_daemon() -> Vec<CheckResult> {
+    let mut results = Vec::new();
+
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("pulsos");
+
+    let port_path = config_dir.join("daemon.port");
+    let token_path = config_dir.join("daemon.token");
+
+    // Check whether a port file exists at all.
+    let port: Option<u16> = std::fs::read_to_string(&port_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok());
+
+    let Some(port) = port else {
+        results.push(CheckResult::ok("Status", "not running"));
+        return results;
+    };
+
+    // Port file exists — check if daemon actually responds.
+    let url = format!("http://127.0.0.1:{port}/health");
+    let alive = reqwest::get(&url)
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    if !alive {
+        results.push(
+            CheckResult::warning(
+                "Status",
+                format!("port file exists (port {port}) but /health did not respond"),
+            )
+            .with_detail(
+                "Run `pulsos daemon stop` to clean up stale files, then `pulsos daemon start`",
+            ),
+        );
+        return results;
+    }
+
+    results.push(CheckResult::ok("Status", format!("running on port {port}")));
+
+    // Check token file exists.
+    if !token_path.exists() {
+        results.push(
+            CheckResult::warning("Token file", "daemon.token missing")
+                .with_detail("The SSE stream cannot be authenticated. Restart the daemon."),
+        );
+        return results;
+    }
+
+    results.push(CheckResult::ok(
+        "Token file",
+        token_path.display().to_string(),
+    ));
+
+    // On Unix, verify mode is 0o600.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        match std::fs::metadata(&token_path) {
+            Ok(meta) => {
+                let mode = meta.permissions().mode() & 0o777;
+                if mode == 0o600 {
+                    results.push(CheckResult::ok("Token permissions", "0600 (secure)"));
+                } else {
+                    results.push(
+                        CheckResult::warning(
+                            "Token permissions",
+                            format!("{:04o} (expected 0600)", mode),
+                        )
+                        .with_detail("Fix with: chmod 600 ~/.config/pulsos/daemon.token"),
+                    );
+                }
+            }
+            Err(e) => {
+                results.push(CheckResult::warning(
+                    "Token permissions",
+                    format!("could not read metadata: {e}"),
+                ));
+            }
         }
     }
 

@@ -5,6 +5,8 @@ use pulsos_core::platform::{PlatformAdapter, TrackedResource};
 use pulsos_test::mock_server::MockGitHub;
 use secrecy::SecretString;
 use std::sync::Arc;
+use wiremock::matchers::{header, method, path_regex};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn test_token() -> SecretString {
     SecretString::new("test-github-token".into())
@@ -41,6 +43,13 @@ async fn fetch_events_returns_runs() {
     // Check second event
     let second = &events[1];
     assert_eq!(second.status, DeploymentStatus::InProgress);
+
+    let first_job = first.metadata.job_details.first().unwrap();
+    assert_eq!(first_job.job_id, Some(700001));
+    assert!(first_job.html_url.is_some());
+    let first_step = first_job.steps.first().unwrap();
+    assert!(first_step.started_at.is_some());
+    assert!(first_step.completed_at.is_some());
 }
 
 #[tokio::test]
@@ -87,4 +96,38 @@ async fn rate_limit_updated_from_headers() {
     let rl = client.rate_limit_status().await.unwrap();
     assert_eq!(rl.limit, 5000);
     assert_eq!(rl.remaining, 4999);
+}
+
+#[tokio::test]
+async fn fetch_job_log_returns_text() {
+    let mock = MockGitHub::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
+    let client = GitHubClient::new_with_base_url(test_token(), mock.url(), cache).unwrap();
+
+    let log = client.fetch_job_log("myorg/my-saas", 700001).await.unwrap();
+    assert!(log.contains("Checkout"));
+    assert!(log.contains("Build"));
+}
+
+#[tokio::test]
+async fn fetch_job_log_auth_failure_is_mapped() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/repos/.+/.+/actions/jobs/\d+/logs$"))
+        .and(header("Authorization", "Bearer test-github-token"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Arc::new(CacheStore::open(&dir.path().join("cache")).unwrap());
+    let client = GitHubClient::new_with_base_url(test_token(), server.uri(), cache).unwrap();
+
+    let err = client
+        .fetch_job_log("myorg/my-saas", 700001)
+        .await
+        .unwrap_err();
+    let msg = err.user_message();
+    assert!(msg.contains("Authentication failed for GitHub"));
 }

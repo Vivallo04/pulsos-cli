@@ -16,7 +16,7 @@ pub mod github {
                     "status": "completed",
                     "conclusion": "success",
                     "workflow_id": 99,
-                    "html_url": "https://github.com/org/repo/actions/runs/100001",
+                    "html_url": "https://github.com/myorg/my-saas/actions/runs/100001",
                     "created_at": "2026-02-15T10:00:00Z",
                     "updated_at": "2026-02-15T10:05:00Z",
                     "run_started_at": "2026-02-15T10:00:30Z",
@@ -33,7 +33,7 @@ pub mod github {
                     "status": "in_progress",
                     "conclusion": null,
                     "workflow_id": 100,
-                    "html_url": "https://github.com/org/repo/actions/runs/100002",
+                    "html_url": "https://github.com/myorg/my-saas/actions/runs/100002",
                     "created_at": "2026-02-15T09:55:00Z",
                     "updated_at": "2026-02-15T10:00:00Z",
                     "run_started_at": "2026-02-15T09:55:10Z",
@@ -47,6 +47,64 @@ pub mod github {
         serde_json::json!({
             "total_count": 0,
             "workflow_runs": []
+        })
+    }
+
+    pub fn workflow_jobs_response() -> serde_json::Value {
+        serde_json::json!({
+            "total_count": 2,
+            "jobs": [
+                {
+                    "id": 700001,
+                    "run_id": 100001,
+                    "head_sha": "abc123def456789",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "started_at": "2026-02-15T10:00:35Z",
+                    "completed_at": "2026-02-15T10:01:30Z",
+                    "name": "build",
+                    "html_url": "https://github.com/myorg/my-saas/actions/runs/100001/job/700001",
+                    "steps": [
+                        {
+                            "name": "Checkout",
+                            "status": "completed",
+                            "conclusion": "success",
+                            "number": 1,
+                            "started_at": "2026-02-15T10:00:35Z",
+                            "completed_at": "2026-02-15T10:00:40Z"
+                        },
+                        {
+                            "name": "Build",
+                            "status": "completed",
+                            "conclusion": "success",
+                            "number": 2,
+                            "started_at": "2026-02-15T10:00:41Z",
+                            "completed_at": "2026-02-15T10:01:30Z"
+                        }
+                    ]
+                },
+                {
+                    "id": 700002,
+                    "run_id": 100001,
+                    "head_sha": "abc123def456789",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "started_at": "2026-02-15T10:01:31Z",
+                    "completed_at": "2026-02-15T10:03:30Z",
+                    "name": "test",
+                    "html_url": "https://github.com/myorg/my-saas/actions/runs/100001/job/700002",
+                    "steps": [
+                        {
+                            "name": "Run tests",
+                            "status": "completed",
+                            "conclusion": "success",
+                            "number": 1,
+                            "started_at": "2026-02-15T10:01:31Z",
+                            "completed_at": "2026-02-15T10:03:30Z"
+                        }
+                    ]
+                }
+            ]
         })
     }
 

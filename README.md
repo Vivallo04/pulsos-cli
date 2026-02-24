@@ -7,13 +7,16 @@ Cross-platform deployment monitoring CLI. Track deployments across GitHub Action
 
 ## What is Pulsos
 
-Pulsos is a terminal tool that gives you a unified view of deployments across GitHub Actions, Railway, and Vercel. It runs as a live TUI dashboard or as one-shot CLI output. The correlation engine matches deployment events across platforms by commit SHA and timestamp heuristics, so you can see how a single commit flows through your CI/CD pipeline.
+Pulsos is a terminal tool that gives you a unified view of deployments across GitHub Actions, Railway, and Vercel. It runs as a live TUI dashboard, as a persistent background daemon with a native system-tray icon, or as one-shot CLI output. The correlation engine matches deployment events across platforms by commit SHA and timestamp heuristics, so you can see how a single commit flows through your CI/CD pipeline.
 
 ## Features
 
 - **Live TUI** with 5 tabs: Unified, Platform, Health, Settings, Logs
 - **Cross-platform correlation** — matches events by SHA and timestamp proximity
 - **Health scoring** per project (weighted: GitHub 40%, Railway 35%, Vercel 25%)
+- **DORA metrics** — Deployment Frequency, Lead Time, Change Failure Rate, Time to Restore
+- **Real-time telemetry** — Railway container metrics (CPU/RAM) and blackbox endpoint pings (TTFB/uptime)
+- **Background daemon** — `pulsos daemon start` runs a persistent process with an Axum SSE server and native tray icon (macOS / Windows)
 - **Auto-discovery** of repos, projects, and services via `repos sync`
 - **Saved views** with filters for project, platform, branch, and status
 - **ETag caching** with rate-limit-aware adaptive polling
@@ -63,6 +66,9 @@ pulsos status --watch
 
 # Or get a one-shot table in your terminal
 pulsos status --once
+
+# Or run as a persistent background daemon
+pulsos daemon start
 ```
 
 **What happens at each step:**
@@ -70,6 +76,7 @@ pulsos status --once
 1. `pulsos auth <platform>` prompts for a token and stores it in your OS keyring (falls back to `~/.config/pulsos/credentials.toml`).
 2. `pulsos repos sync` queries each authenticated platform, discovers available repos/projects/services, lets you pick which ones to track, and auto-generates correlations.
 3. `pulsos status` fetches recent deployments from all tracked resources, correlates them, and displays the result. With `--watch` it launches the live TUI; without flags it auto-detects (TUI if interactive terminal, one-shot otherwise).
+4. `pulsos daemon start` detaches the daemon to the background. The TUI automatically connects to the daemon's SSE stream when one is running, saving API quota.
 
 ## Authentication
 
@@ -181,6 +188,10 @@ branch_filter = "main"
 status_filter = ["success", "failure"]
 refresh_interval = 5
 
+[[groups]]
+name = "backend"
+resources = ["api-core", "auth-service"]
+
 [tui]
 theme = "dark"                  # "dark" or "light"
 fps = 10                        # Render frames per second
@@ -203,6 +214,7 @@ max_size_mb = 100
 | `[[vercel.teams]]` | Team name, include projects, preview deployment toggle |
 | `[[correlations]]` | Link a GitHub repo, Railway project, and Vercel project under one name |
 | `[[views]]` | Named filter presets (projects, platforms, branch, status) |
+| `[[groups]]` | Named collections of resources for UI-level grouping |
 | `[tui]` | Theme, FPS, refresh interval, default tab, sparklines |
 | `[cache]` | Max cache size in MB |
 
@@ -277,6 +289,24 @@ pulsos config edit                  # Open config in $EDITOR
 pulsos config wizard                # Run interactive platform setup wizard
 ```
 
+### Daemon
+
+```sh
+pulsos daemon run                   # Run the daemon in the foreground (owns main thread for tray icon)
+pulsos daemon start                 # Start the daemon as a detached background process
+pulsos daemon stop                  # Stop the running daemon (sends SIGTERM via PID file)
+pulsos daemon status                # Print daemon running state and port
+```
+
+**Daemon architecture:**
+- `daemon run` starts an Axum SSE server on an ephemeral port, writes the port to `~/.config/pulsos/daemon.port`, generates a random 64-char bearer token at `~/.config/pulsos/daemon.token` (mode 0600 on Unix), and (on macOS/Windows) shows a native tray icon in the menu bar.
+- `daemon start` re-execs `daemon run` as a detached process (stdin/stdout/stderr closed).
+- `daemon stop` reads `~/.config/pulsos/daemon.pid` and sends SIGTERM (Unix) or `taskkill /F` (Windows), then removes `daemon.pid`, `daemon.port`, and `daemon.token`.
+- `daemon status` checks the `/health` endpoint of the running daemon.
+- When a daemon is running, `pulsos status --watch` connects to its bearer-auth-protected SSE stream (`/api/stream`) instead of polling platform APIs directly, conserving rate-limit budget. The `/health` endpoint remains public (used by `daemon status`).
+- The tray icon shows three states: neutral (all OK), syncing (blue), alert (red — endpoint down or deployment failure on main/master).
+- Desktop notifications fire on endpoint state transitions (up→down, down→up) on macOS and Windows.
+
 ### Other
 
 ```sh
@@ -308,13 +338,36 @@ pulsos completions elvish
 | `Enter` | Apply search (in search mode) |
 | `Esc` | Exit search mode / cancel |
 | `r` | Force refresh |
+| `s` | Cycle sort order on Unified tab (by time / by platform) |
 | `q` / `Ctrl+C` | Quit |
+
+### Platform Tab
+
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Switch provider subtab (GitHub / Railway / Vercel) |
+| `g` | Switch to GitHub subtab |
+| `w` | Switch to Railway subtab |
+| `v` | Switch to Vercel subtab |
+| `d` | Toggle GitHub job/step details panel (GitHub subtab only) |
+
+### Platform Tab — Details Panel (GitHub)
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` or `j` / `k` | Navigate tree / scroll right panel |
+| `→` / `Enter` | Expand job or open right panel |
+| `←` | Collapse job or focus left tree |
+| `PageDown` / `PageUp` | Scroll right panel by 20 lines |
+| `Ctrl+D` / `Ctrl+U` | Scroll right panel by 10 lines |
+| `Esc` | Close details panel |
 
 ### Logs Tab
 
 | Key | Action |
 |-----|--------|
 | `f` | Cycle log level filter (ALL → ERR → WARN → INFO → ALL) |
+| `c` | Copy selected log message to clipboard |
 
 ### Settings Tab
 
@@ -335,25 +388,57 @@ pulsos-cli/
 │   │   └── src/
 │   │       ├── platform/     # GitHub, Railway, Vercel API clients + retry helper
 │   │       ├── correlation/  # Event matching engine (SHA + timestamp heuristic)
-│   │       ├── domain/       # DeploymentEvent, CorrelatedEvent, health scoring
-│   │       ├── auth/         # Credential resolution, keyring, file store, FallbackStore
+│   │       ├── domain/       # DeploymentEvent, CorrelatedEvent, DoraMetrics,
+│   │       │                 # ResourceMetrics, EndpointHealth, health scoring
+│   │       ├── auth/         # Credential resolution, KeyringStore, FileCredentialStore, FallbackStore
 │   │       ├── config/       # TOML config loading and saving
 │   │       ├── cache/        # sled-based ETag cache
-│   │       ├── health/       # Platform health checks (PlatformHealthReport)
+│   │       ├── health/       # Platform health checks (PlatformHealthReport) + PingEngine
 │   │       ├── scheduler/    # Polling budget and adaptive scheduler
+│   │       ├── analytics/    # DoraCalculator
 │   │       └── sync/         # Auto-correlation builder (build_correlations, merge)
 │   ├── pulsos-cli/           # Binary crate
+│   │   ├── assets/           # Embedded tray icon PNGs (neutral, sync, alert — 16x16)
 │   │   └── src/
-│   │       ├── main.rs       # CLI entry point (clap), logging init (ring buffer + stderr)
-│   │       ├── commands/     # Command handlers: status, auth, repos, views, config, doctor
+│   │       ├── main.rs       # CLI entry point (clap); daemon run owns main thread for tray
+│   │       ├── commands/     # Command handlers: status, auth, repos, views, config, doctor, daemon
+│   │       │   ├── daemon.rs # pulsos daemon [run|start|stop|status]
 │   │       │   ├── wizard.rs # First-run config wizard (auth + discovery + re-check)
 │   │       │   └── ui/       # Full-screen interactive prompt layer (ScreenSession)
+│   │       ├── daemon/       # Background daemon subsystem
+│   │       │   ├── engine.rs # Wraps run_poller; broadcasts DataSnapshot via SSE channel
+│   │       │   ├── server.rs # Axum SSE server (/api/stream, /health); writes daemon.port
+│   │       │   ├── tray.rs   # Native tray icon (macOS/Windows only; tray-icon + tao + muda)
+│   │       │   └── notify.rs # Desktop notifications on endpoint state transitions
 │   │       ├── tui/          # ratatui live TUI (5 tabs: Unified, Platform, Health, Settings, Logs)
+│   │       │   ├── poll.rs   # Background poller; connects to SSE if daemon is running
+│   │       │   ├── actions.rs # ActionRequest/ActionResult async channel for settings
 │   │       │   └── widgets/  # Per-tab rendering components + log_buffer, settings_flow
 │   │       └── output/       # Table, compact, JSON formatters
-│   └── pulsos-test/          # Test helpers and builders (EventBuilder)
+│   └── pulsos-test/          # Test helpers and builders (EventBuilder, mock servers)
 └── Cargo.toml                # Workspace root
 ```
+
+### Daemon File Locations
+
+| File | Path | Notes |
+|------|------|-------|
+| Port file | `~/.config/pulsos/daemon.port` | Written by SSE server on bind; mode 0600 on Unix |
+| PID file | `~/.config/pulsos/daemon.pid` | Written by `daemon run` on startup |
+| Token file | `~/.config/pulsos/daemon.token` | 64-char random hex bearer token; mode 0600 on Unix; removed on stop |
+| Credentials | `~/.config/pulsos/credentials.toml` | File-based fallback; mode 0600 on Unix |
+| Config | `~/.config/pulsos/config.toml` | Main TOML config |
+
+### Polling Intervals (TUI / Poller)
+
+| Platform | Interval | Notes |
+|----------|----------|-------|
+| GitHub | 30s (adaptive) | Backs off to 60s/120s as rate limit is consumed |
+| Railway | 15s | |
+| Vercel | 15s | |
+| Health checks | 30s | Per-platform token + connectivity readiness |
+| Container metrics | 30s | Railway CPU/RAM via GraphQL |
+| Endpoint pings | 8s | Blackbox TTFB/uptime; does not consume platform quota |
 
 ## Development
 
@@ -386,6 +471,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run --bin pulsos -- status
 cargo run --bin pulsos -- status --watch
 cargo run --bin pulsos -- doctor
+cargo run --bin pulsos -- daemon run
 ```
 
 ## License
@@ -394,4 +480,4 @@ MIT
 
 ---
 
-Last Updated: 2026-02-22
+Last Updated: 2026-02-23
