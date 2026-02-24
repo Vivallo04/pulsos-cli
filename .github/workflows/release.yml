@@ -136,6 +136,12 @@ jobs:
             artifacts/SHA256SUMS.txt
             artifacts/pulsos.rb
 
+  publish-packages:
+    name: Publish Packages
+    needs: release
+    uses: ./.github/workflows/publish-packages.yml
+    secrets: inherit
+
   publish-crate:
     name: Publish to crates.io
     needs: [build, release]
